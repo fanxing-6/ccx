@@ -1,0 +1,13 @@
+# 编译产物
+ccx
+dist/
+
+# npm
+node_modules/
+npm/bin/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
