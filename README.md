@@ -2,7 +2,7 @@
 
 管理多套 Claude Code API 配置，一键切换，即时启动。
 
-所有配置存储在 [Gitee Gist](https://gitee.com/gists) 云端，跨机器同步，本地零存储。
+所有配置存储在 [Gitee Gist](https://gitee.com/dashboard/codes) 云端，跨机器同步，本地零存储。
 
 ## 功能特性
 
@@ -42,7 +42,7 @@ go build -o ccx .
 
 1. **Claude Code CLI** 已安装并在 `$PATH` 中（[安装文档](https://docs.anthropic.com/en/docs/claude-code)）
 2. **Gitee 账号** 及 Personal Access Token（需要 Gist 读写权限）
-3. **一个 Gitee Gist** 用于存储配置（在 [gitee.com/gists](https://gitee.com/gists) 创建）
+3. **一个 Gitee Gist** 用于存储配置（在 [gitee.com/dashboard/codes](https://gitee.com/dashboard/codes) 创建）
 
 ## 快速开始
 
