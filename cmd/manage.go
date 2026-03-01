@@ -46,10 +46,12 @@ var addCmd = &cobra.Command{
 
 		if useEditor {
 			template := map[string]interface{}{
+				"api_format": "anthropic",
 				"env": map[string]string{
+					"ANTHROPIC_API_KEY":    "",
 					"ANTHROPIC_AUTH_TOKEN": "",
-					"ANTHROPIC_BASE_URL":  "",
-					"API_TIMEOUT_MS":      "600000",
+					"ANTHROPIC_BASE_URL":   "",
+					"API_TIMEOUT_MS":       "600000",
 				},
 			}
 			tmpl, _ := json.MarshalIndent(template, "", "  ")
@@ -101,12 +103,29 @@ var removeCmd = &cobra.Command{
 	},
 }
 
+func promptAPIFormat() (string, error) {
+	choices := []internal.ActionItem{
+		{Label: "Anthropic（默认）", Key: "anthropic"},
+		{Label: "OpenAI Responses API", Key: "openai"},
+	}
+	selected, err := internal.SelectAction("选择 API 格式", choices)
+	if err != nil {
+		return "", fmt.Errorf("选择 API 格式失败: %w", err)
+	}
+	return selected, nil
+}
+
 // interactiveAddProfile 交互式引导创建 profile
 func interactiveAddProfile() ([]byte, error) {
 	fmt.Println("创建新配置（交互式引导）")
 	fmt.Println("─────────────────────")
 
-	token := internal.PromptPassword("ANTHROPIC_AUTH_TOKEN")
+	apiFormat, err := promptAPIFormat()
+	if err != nil {
+		return nil, err
+	}
+
+	token := internal.PromptPassword("API Token（将写入 ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN）")
 	if token == "" {
 		return nil, fmt.Errorf("Token 不能为空")
 	}
@@ -123,9 +142,10 @@ func interactiveAddProfile() ([]byte, error) {
 	timeout := internal.PromptInput("API_TIMEOUT_MS", "600000")
 
 	env := map[string]string{
+		"ANTHROPIC_API_KEY":    token,
 		"ANTHROPIC_AUTH_TOKEN": token,
-		"ANTHROPIC_BASE_URL":  baseURL,
-		"API_TIMEOUT_MS":      timeout,
+		"ANTHROPIC_BASE_URL":   baseURL,
+		"API_TIMEOUT_MS":       timeout,
 	}
 	if model != "" {
 		env["ANTHROPIC_MODEL"] = model
@@ -142,6 +162,9 @@ func interactiveAddProfile() ([]byte, error) {
 
 	settings := map[string]interface{}{
 		"env": env,
+	}
+	if apiFormat == "openai" {
+		settings["api_format"] = "openai"
 	}
 
 	content, _ := json.MarshalIndent(settings, "", "  ")

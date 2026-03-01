@@ -4,6 +4,7 @@ import (
 	"ccx/internal"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -31,8 +32,13 @@ var infoCmd = &cobra.Command{
 		}
 
 		info := internal.ExtractProfileInfo(profile.Settings)
+		format := info.APIFormat
+		if format == "" {
+			format = "anthropic"
+		}
 
 		fmt.Printf("配置名称: %s\n", name)
+		fmt.Printf("API 格式: %s\n", strings.ToLower(format))
 		fmt.Printf("API 地址: %s\n", info.BaseURL)
 		if info.Model != "" {
 			fmt.Printf("模型:     %s\n", info.Model)

@@ -2,11 +2,16 @@ package cmd
 
 import (
 	"ccx/internal"
+	"ccx/internal/proxy"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -47,13 +52,10 @@ var rootCmd = &cobra.Command{
 		var profileName string
 
 		if len(args) > 0 {
-			// ccx <name> 直接启动
 			profileName = args[0]
 		} else {
-			// ccx 交互式选择（含配置管理入口），循环直到选中 profile
 			for {
 				fmt.Println("正在从 Gitee Gist 获取配置列表...")
-				// 每次循环重新拉取，确保配置管理操作后列表是最新的
 				profiles, err := client.FetchAllProfiles()
 				if err != nil {
 					return err
@@ -62,7 +64,6 @@ var rootCmd = &cobra.Command{
 					return fmt.Errorf("Gitee Gist 中没有配置，运行 ccx add <name> 创建")
 				}
 
-				// 重新加载 cfg 以获取最新的 default_profile
 				cfg, _ = internal.LoadAppConfig()
 
 				selected, err := selectProfileOrConfig(profiles, cfg.DefaultProfile)
@@ -90,15 +91,17 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-// selectProfileOrConfig 主选择界面：profile 列表 + "配置管理"入口
 func selectProfileOrConfig(profiles []*internal.Profile, defaultProfile string) (string, error) {
-	// 构建 profile 列表项
 	items := make([]internal.ProfileItem, 0, len(profiles)+1)
 	defaultIdx := 0
 	for i, p := range profiles {
 		info := internal.ExtractProfileInfo(p.Settings)
+		name := p.Name
+		if strings.EqualFold(info.APIFormat, "openai") {
+			name = p.Name + " [openai]"
+		}
 		item := internal.ProfileItem{
-			Name:    p.Name,
+			Name:    name,
 			BaseURL: internal.ShortenURL(info.BaseURL),
 			Model:   info.Model,
 		}
@@ -108,7 +111,6 @@ func selectProfileOrConfig(profiles []*internal.Profile, defaultProfile string) 
 		}
 	}
 
-	// 追加"配置管理"选项
 	items = append(items, internal.ProfileItem{
 		Name:    "⚙ 配置管理",
 		BaseURL: "",
@@ -123,22 +125,31 @@ func selectProfileOrConfig(profiles []*internal.Profile, defaultProfile string) 
 	if selected == "⚙ 配置管理" {
 		return "__config__", nil
 	}
+	if strings.HasSuffix(selected, " [openai]") {
+		return strings.TrimSuffix(selected, " [openai]"), nil
+	}
 	return selected, nil
 }
 
-// launchClaude 使用指定 profile 启动 claude
 func launchClaude(profileName string, extraArgs []string, dangerous bool, client *internal.GistClient, cfg *internal.AppConfig) error {
 	profile, err := client.FetchProfile(profileName)
 	if err != nil {
 		return err
 	}
 
-	// 直接使用 profile settings
-	settings := profile.Settings
-
-	// 校验合并后的 settings JSON 合法性
-	if !json.Valid(settings) {
+	if !json.Valid(profile.Settings) {
 		return fmt.Errorf("配置 %q 的 settings JSON 格式损坏，请运行 ccx edit %s 修复", profileName, profileName)
+	}
+
+	info := internal.ExtractProfileInfo(profile.Settings)
+	apiFormat := strings.ToLower(strings.TrimSpace(info.APIFormat))
+	if apiFormat == "" {
+		apiFormat = "anthropic"
+	}
+
+	token, err := resolveProfileToken(info)
+	if err != nil {
+		return fmt.Errorf("配置 %q 鉴权冲突: %w", profileName, err)
 	}
 
 	claudePath, err := exec.LookPath(cfg.ClaudeCmd)
@@ -146,15 +157,143 @@ func launchClaude(profileName string, extraArgs []string, dangerous bool, client
 		return fmt.Errorf("未找到 %s 命令，请确认已安装 Claude Code", cfg.ClaudeCmd)
 	}
 
-	cmdArgs := []string{cfg.ClaudeCmd, "--settings", string(settings)}
-	if dangerous {
-		cmdArgs = append(cmdArgs, "--dangerously-skip-permissions")
-	}
-	cmdArgs = append(cmdArgs, extraArgs...)
+	if apiFormat != "openai" {
+		settingsForClaude, err := buildClaudeSettings(profile.Settings, token, "")
+		if err != nil {
+			return err
+		}
 
-	// 打印完整执行命令摘要
-	info := internal.ExtractProfileInfo(profile.Settings)
-	fmt.Printf("\n=> %s --settings '{...}' ", cfg.ClaudeCmd)
+		cmdArgs := []string{cfg.ClaudeCmd, "--settings", string(settingsForClaude)}
+		if dangerous {
+			cmdArgs = append(cmdArgs, "--dangerously-skip-permissions")
+		}
+		cmdArgs = append(cmdArgs, extraArgs...)
+
+		printLaunchSummary(cfg.ClaudeCmd, profileName, info, dangerous, extraArgs, "", token)
+		return syscall.Exec(claudePath, cmdArgs, os.Environ())
+	}
+
+	if info.BaseURL == "" {
+		return fmt.Errorf("openai 模式需要设置 ANTHROPIC_BASE_URL")
+	}
+	if token == "" {
+		return fmt.Errorf("openai 模式需要设置 ANTHROPIC_API_KEY 或 ANTHROPIC_AUTH_TOKEN")
+	}
+
+	port, shutdown, err := proxy.StartProxy(info.BaseURL, token)
+	if err != nil {
+		return err
+	}
+	proxyURL := proxy.ProxyURL(port)
+
+	settingsForClaude, err := buildClaudeSettings(profile.Settings, token, proxyURL)
+	if err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = shutdown(ctx)
+		return err
+	}
+
+	args := []string{"--settings", string(settingsForClaude)}
+	if dangerous {
+		args = append(args, "--dangerously-skip-permissions")
+	}
+	args = append(args, extraArgs...)
+
+	cmd := exec.Command(claudePath, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+
+	printLaunchSummary(cfg.ClaudeCmd, profileName, info, dangerous, extraArgs, proxyURL, token)
+
+	if err := cmd.Start(); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = shutdown(ctx)
+		return fmt.Errorf("启动 Claude 子进程失败: %w", err)
+	}
+
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	go func() {
+		for sig := range sigCh {
+			if cmd.Process != nil {
+				_ = cmd.Process.Signal(sig)
+			}
+		}
+	}()
+
+	waitErr := cmd.Wait()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	shutdownErr := shutdown(ctx)
+
+	if waitErr != nil {
+		return waitErr
+	}
+	if shutdownErr != nil {
+		return fmt.Errorf("代理关闭失败: %w", shutdownErr)
+	}
+	return nil
+}
+
+func resolveProfileToken(info internal.ProfileInfo) (string, error) {
+	apiKey := strings.TrimSpace(info.APIKey)
+	authToken := strings.TrimSpace(info.AuthToken)
+
+	if apiKey != "" && authToken != "" && apiKey != authToken {
+		return "", fmt.Errorf("ANTHROPIC_API_KEY 与 ANTHROPIC_AUTH_TOKEN 不一致")
+	}
+	if apiKey != "" {
+		return apiKey, nil
+	}
+	if authToken != "" {
+		return authToken, nil
+	}
+	return "", nil
+}
+
+func buildClaudeSettings(original json.RawMessage, token, forceBaseURL string) ([]byte, error) {
+	var obj map[string]interface{}
+	if err := json.Unmarshal(original, &obj); err != nil {
+		return nil, fmt.Errorf("解析 settings 失败: %w", err)
+	}
+
+	env := map[string]interface{}{}
+	if existingEnv, ok := obj["env"]; ok {
+		typed, ok := existingEnv.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("settings.env 必须是对象")
+		}
+		env = typed
+	}
+
+	if token != "" {
+		env["ANTHROPIC_API_KEY"] = token
+	}
+	delete(env, "ANTHROPIC_AUTH_TOKEN")
+	if forceBaseURL != "" {
+		env["ANTHROPIC_BASE_URL"] = forceBaseURL
+	}
+
+	obj["env"] = env
+	// api_format 是 ccx 内部字段，不传递给 Claude Code
+	delete(obj, "api_format")
+
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("生成 settings 失败: %w", err)
+	}
+	return out, nil
+}
+
+func printLaunchSummary(claudeCmd, profileName string, info internal.ProfileInfo, dangerous bool, extraArgs []string, proxyURL, token string) {
+	fmt.Printf("\n=> %s --settings '{...}' ", claudeCmd)
 	if dangerous {
 		fmt.Print("--dangerously-skip-permissions ")
 	}
@@ -165,11 +304,12 @@ func launchClaude(profileName string, extraArgs []string, dangerous bool, client
 	if info.Model != "" {
 		fmt.Printf(" [%s]", info.Model)
 	}
+	if strings.EqualFold(info.APIFormat, "openai") {
+		fmt.Printf("\n   proxy: %s", proxyURL)
+		fmt.Printf("\n   token: %s", proxy.MaskToken(token))
+	}
 	fmt.Println()
 	fmt.Println()
-
-	// 用 syscall.Exec 替换当前进程
-	return syscall.Exec(claudePath, cmdArgs, os.Environ())
 }
 
 func Execute() {

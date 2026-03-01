@@ -24,8 +24,11 @@ type Profile struct {
 
 // ProfileInfo 从 settings JSON 中提取的展示信息
 type ProfileInfo struct {
-	BaseURL string
-	Model   string
+	BaseURL   string
+	Model     string
+	APIFormat string
+	APIKey    string
+	AuthToken string
 }
 
 // ConfigDir 返回配置目录路径 ~/.config/ccx
@@ -74,14 +77,22 @@ func ConfigExists() bool {
 // ExtractProfileInfo 从 settings JSON 中提取展示信息
 func ExtractProfileInfo(settings json.RawMessage) ProfileInfo {
 	var parsed struct {
-		Env map[string]string `json:"env"`
+		APIFormat string            `json:"api_format"`
+		Env       map[string]string `json:"env"`
 	}
 	json.Unmarshal(settings, &parsed)
 
-	info := ProfileInfo{}
+	info := ProfileInfo{
+		APIFormat: "anthropic",
+	}
+	if parsed.APIFormat != "" {
+		info.APIFormat = parsed.APIFormat
+	}
 	if parsed.Env != nil {
 		info.BaseURL = parsed.Env["ANTHROPIC_BASE_URL"]
 		info.Model = parsed.Env["ANTHROPIC_MODEL"]
+		info.APIKey = parsed.Env["ANTHROPIC_API_KEY"]
+		info.AuthToken = parsed.Env["ANTHROPIC_AUTH_TOKEN"]
 	}
 	return info
 }

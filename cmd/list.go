@@ -3,6 +3,7 @@ package cmd
 import (
 	"ccx/internal"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -46,6 +47,9 @@ var listCmd = &cobra.Command{
 			model := ""
 			if info.Model != "" {
 				model = fmt.Sprintf("  [%s]", info.Model)
+			}
+			if strings.EqualFold(info.APIFormat, "openai") {
+				model = model + " [openai]"
 			}
 			url := ""
 			if info.BaseURL != "" {
