@@ -1,6 +1,6 @@
 {
   "name": "claude-ccx",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Claude Code eXecutor — 多配置管理与快速切换工具",
   "bin": {
     "ccx": "./bin/ccx"
