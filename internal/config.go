@@ -24,11 +24,12 @@ type Profile struct {
 
 // ProfileInfo 从 settings JSON 中提取的展示信息
 type ProfileInfo struct {
-	BaseURL   string
-	Model     string
-	APIFormat string
-	APIKey    string
-	AuthToken string
+	BaseURL         string
+	Model           string
+	APIFormat       string
+	APIKey          string
+	AuthToken       string
+	ReasoningEffort string
 }
 
 // ConfigDir 返回配置目录路径 ~/.config/ccx
@@ -93,6 +94,7 @@ func ExtractProfileInfo(settings json.RawMessage) ProfileInfo {
 		info.Model = parsed.Env["ANTHROPIC_MODEL"]
 		info.APIKey = parsed.Env["ANTHROPIC_API_KEY"]
 		info.AuthToken = parsed.Env["ANTHROPIC_AUTH_TOKEN"]
+		info.ReasoningEffort = parsed.Env["OPENAI_REASONING_EFFORT"]
 	}
 	return info
 }

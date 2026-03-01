@@ -43,6 +43,9 @@ var infoCmd = &cobra.Command{
 		if info.Model != "" {
 			fmt.Printf("模型:     %s\n", info.Model)
 		}
+		if info.ReasoningEffort != "" {
+			fmt.Printf("思考档位: %s\n", info.ReasoningEffort)
+		}
 		fmt.Println("\n完整 settings JSON:")
 		fmt.Println("─────────────────────")
 

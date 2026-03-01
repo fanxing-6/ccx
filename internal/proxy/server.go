@@ -18,17 +18,27 @@ import (
 
 const defaultProxyReadTimeout = 120 * time.Second
 
+type ProxyOptions struct {
+	ReasoningEffort string
+}
+
 // StartProxy 启动本地 Anthropic 兼容代理，转发到 OpenAI 兼容上游。
-func StartProxy(targetBaseURL, authToken string) (int, func(context.Context) error, error) {
+func StartProxy(targetBaseURL, authToken string, options ProxyOptions) (int, func(context.Context) error, error) {
 	baseURL := strings.TrimSpace(strings.TrimSuffix(targetBaseURL, "/"))
 	if baseURL == "" {
 		return 0, nil, fmt.Errorf("上游 Base URL 不能为空")
 	}
 
+	if normalized, ok := NormalizeReasoningEffort(options.ReasoningEffort); !ok {
+		return 0, nil, fmt.Errorf("OPENAI_REASONING_EFFORT 无效: %q（允许值: none|auto|minimal|low|medium|high|xhigh）", options.ReasoningEffort)
+	} else {
+		options.ReasoningEffort = normalized
+	}
+
 	client := &http.Client{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/messages", func(w http.ResponseWriter, r *http.Request) {
-		handleMessages(w, r, client, baseURL, authToken)
+		handleMessages(w, r, client, baseURL, authToken, options)
 	})
 	mux.HandleFunc("/v1/messages/count_tokens", handleCountTokens)
 
@@ -54,7 +64,7 @@ func StartProxy(targetBaseURL, authToken string) (int, func(context.Context) err
 	return port, shutdown, nil
 }
 
-func handleMessages(w http.ResponseWriter, r *http.Request, client *http.Client, baseURL, authToken string) {
+func handleMessages(w http.ResponseWriter, r *http.Request, client *http.Client, baseURL, authToken string, options ProxyOptions) {
 	if r.Method != http.MethodPost {
 		writeAnthropicError(w, http.StatusMethodNotAllowed, "只支持 POST /v1/messages")
 		return
@@ -72,8 +82,14 @@ func handleMessages(w http.ResponseWriter, r *http.Request, client *http.Client,
 		return
 	}
 
-	stream := gjson.GetBytes(body, "stream").Bool()
-	openAIReqBody := ConvertClaudeRequestToResponses(body, stream)
+	bodyForConvert, err := applyProfileThinking(body, options.ReasoningEffort)
+	if err != nil {
+		writeAnthropicError(w, http.StatusInternalServerError, fmt.Sprintf("代理 thinking 配置处理失败: %v", err))
+		return
+	}
+
+	stream := gjson.GetBytes(bodyForConvert, "stream").Bool()
+	openAIReqBody := ConvertClaudeRequestToResponses(bodyForConvert, stream)
 
 	upstreamURL := baseURL + "/responses"
 	upReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, bytes.NewReader(openAIReqBody))

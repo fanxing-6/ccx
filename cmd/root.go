@@ -31,6 +31,7 @@ var rootCmd = &cobra.Command{
 	Example: `  ccx                  # 交互式选择配置并启动
   ccx volc             # 直接使用 volc 配置启动
   ccx -d volc          # 危险模式启动（跳过权限确认）
+  ccx auth status      # 透传到 Claude CLI（非 ccx 命令）
   ccx list             # 列出所有配置
   ccx info volc        # 查看 volc 配置详情`,
 	Args: cobra.ArbitraryArgs,
@@ -180,7 +181,9 @@ func launchClaude(profileName string, extraArgs []string, dangerous bool, client
 		return fmt.Errorf("openai 模式需要设置 ANTHROPIC_API_KEY 或 ANTHROPIC_AUTH_TOKEN")
 	}
 
-	port, shutdown, err := proxy.StartProxy(info.BaseURL, token)
+	port, shutdown, err := proxy.StartProxy(info.BaseURL, token, proxy.ProxyOptions{
+		ReasoningEffort: info.ReasoningEffort,
+	})
 	if err != nil {
 		return err
 	}
@@ -307,12 +310,23 @@ func printLaunchSummary(claudeCmd, profileName string, info internal.ProfileInfo
 	if strings.EqualFold(info.APIFormat, "openai") {
 		fmt.Printf("\n   proxy: %s", proxyURL)
 		fmt.Printf("\n   token: %s", proxy.MaskToken(token))
+		if strings.TrimSpace(info.ReasoningEffort) != "" {
+			fmt.Printf("\n   reasoning: %s", strings.TrimSpace(info.ReasoningEffort))
+		}
 	}
 	fmt.Println()
 	fmt.Println()
 }
 
 func Execute() {
+	if passArgs, dangerous, ok := decideRawPassthrough(os.Args[1:]); ok {
+		if err := launchClaudePassthrough(resolvePassthroughClaudeCmd(), passArgs, dangerous); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}

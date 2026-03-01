@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"strings"
 
 	"github.com/tidwall/gjson"
 )
@@ -17,6 +18,15 @@ const (
 	thinkingLevelXHigh   = "xhigh"
 )
 
+var levelToBudgetMap = map[string]int{
+	thinkingLevelNone:    0,
+	thinkingLevelAuto:    -1,
+	thinkingLevelMinimal: 512,
+	thinkingLevelLow:     1024,
+	thinkingLevelMedium:  8192,
+	thinkingLevelHigh:    24576,
+	thinkingLevelXHigh:   32768,
+}
 
 func convertBudgetToLevel(budget int) (string, bool) {
 	switch {
@@ -37,6 +47,25 @@ func convertBudgetToLevel(budget int) (string, bool) {
 	default:
 		return thinkingLevelXHigh, true
 	}
+}
+
+func convertLevelToBudget(level string) (int, bool) {
+	budget, ok := levelToBudgetMap[strings.ToLower(strings.TrimSpace(level))]
+	return budget, ok
+}
+
+// NormalizeReasoningEffort validates and normalizes effort level to lowercase.
+// Allowed values follow CLIProxyAPI level semantics:
+// none/auto/minimal/low/medium/high/xhigh.
+func NormalizeReasoningEffort(level string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(level))
+	if normalized == "" {
+		return "", true
+	}
+	if _, ok := convertLevelToBudget(normalized); !ok {
+		return "", false
+	}
+	return normalized, true
 }
 
 // getThinkingText extracts text from thinking content blocks with several provider variants.

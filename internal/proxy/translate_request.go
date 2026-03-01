@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -8,227 +10,322 @@ import (
 )
 
 // ConvertClaudeRequestToResponses converts Anthropic /v1/messages request to OpenAI /v1/responses format.
+// The implementation is aligned with CLIProxyAPI codex->claude request translator behavior.
 func ConvertClaudeRequestToResponses(inputRawJSON []byte, stream bool) []byte {
 	root := gjson.ParseBytes(inputRawJSON)
-	out := `{"model":"","input":[],"stream":false}`
+	modelName := root.Get("model").String()
 
-	out, _ = sjson.Set(out, "model", root.Get("model").String())
-	out, _ = sjson.Set(out, "stream", stream)
+	out := `{"model":"","instructions":"","input":[]}`
+	out, _ = sjson.Set(out, "model", modelName)
 
-	if maxTokens := root.Get("max_tokens"); maxTokens.Exists() {
-		out, _ = sjson.Set(out, "max_output_tokens", maxTokens.Int())
-	}
-
-	if temp := root.Get("temperature"); temp.Exists() {
-		out, _ = sjson.Set(out, "temperature", temp.Float())
-	}
-	if topP := root.Get("top_p"); topP.Exists() {
-		out, _ = sjson.Set(out, "top_p", topP.Float())
-	}
-
-	if stopSequences := root.Get("stop_sequences"); stopSequences.Exists() && stopSequences.IsArray() {
-		var stops []string
-		stopSequences.ForEach(func(_, value gjson.Result) bool {
-			stops = append(stops, value.String())
+	// System message -> developer input message.
+	system := root.Get("system")
+	if system.IsArray() {
+		message := `{"type":"message","role":"developer","content":[]}`
+		contentIndex := 0
+		system.ForEach(func(_, item gjson.Result) bool {
+			if item.Get("type").String() != "text" {
+				return true
+			}
+			text := item.Get("text").String()
+			if strings.HasPrefix(text, "x-anthropic-billing-header: ") {
+				return true
+			}
+			message, _ = sjson.Set(message, fmt.Sprintf("content.%d.type", contentIndex), "input_text")
+			message, _ = sjson.Set(message, fmt.Sprintf("content.%d.text", contentIndex), text)
+			contentIndex++
 			return true
 		})
-		if len(stops) > 0 {
-			out, _ = sjson.Set(out, "stop", stops)
+		if contentIndex > 0 {
+			out, _ = sjson.SetRaw(out, "input.-1", message)
 		}
+	} else if system.Exists() && system.Type == gjson.String && strings.TrimSpace(system.String()) != "" {
+		message := `{"type":"message","role":"developer","content":[{"type":"input_text","text":""}]}`
+		message, _ = sjson.Set(message, "content.0.text", system.String())
+		out, _ = sjson.SetRaw(out, "input.-1", message)
 	}
 
-	if system := root.Get("system"); system.Exists() {
-		switch {
-		case system.Type == gjson.String:
-			if system.String() != "" {
-				out, _ = sjson.Set(out, "instructions", system.String())
+	// Messages conversion.
+	messages := root.Get("messages")
+	if messages.IsArray() {
+		messages.ForEach(func(_, message gjson.Result) bool {
+			role := message.Get("role").String()
+			content := message.Get("content")
+
+			newMessage := func() string {
+				msg := `{"type":"message","role":"","content":[]}`
+				msg, _ = sjson.Set(msg, "role", role)
+				return msg
 			}
-		case system.IsArray():
-			var parts []string
-			system.ForEach(func(_, item gjson.Result) bool {
-				if text := item.Get("text"); text.Exists() {
-					parts = append(parts, text.String())
+
+			msg := newMessage()
+			contentIndex := 0
+			hasContent := false
+
+			flushMessage := func() {
+				if hasContent {
+					out, _ = sjson.SetRaw(out, "input.-1", msg)
+					msg = newMessage()
+					contentIndex = 0
+					hasContent = false
 				}
-				return true
-			})
-			if len(parts) > 0 {
-				out, _ = sjson.Set(out, "instructions", strings.Join(parts, "\n\n"))
 			}
-		}
+
+			appendText := func(text string) {
+				partType := "input_text"
+				if role == "assistant" {
+					partType = "output_text"
+				}
+				msg, _ = sjson.Set(msg, fmt.Sprintf("content.%d.type", contentIndex), partType)
+				msg, _ = sjson.Set(msg, fmt.Sprintf("content.%d.text", contentIndex), text)
+				contentIndex++
+				hasContent = true
+			}
+
+			appendImage := func(dataURL string) {
+				msg, _ = sjson.Set(msg, fmt.Sprintf("content.%d.type", contentIndex), "input_image")
+				msg, _ = sjson.Set(msg, fmt.Sprintf("content.%d.image_url", contentIndex), dataURL)
+				contentIndex++
+				hasContent = true
+			}
+
+			if content.IsArray() {
+				content.ForEach(func(_, part gjson.Result) bool {
+					switch part.Get("type").String() {
+					case "text":
+						appendText(part.Get("text").String())
+
+					case "image":
+						source := part.Get("source")
+						if source.Exists() {
+							data := source.Get("data").String()
+							if data == "" {
+								data = source.Get("base64").String()
+							}
+							if data != "" {
+								mediaType := source.Get("media_type").String()
+								if mediaType == "" {
+									mediaType = source.Get("mime_type").String()
+								}
+								if mediaType == "" {
+									mediaType = "application/octet-stream"
+								}
+								appendImage(fmt.Sprintf("data:%s;base64,%s", mediaType, data))
+							}
+						}
+
+					case "tool_use":
+						flushMessage()
+						functionCall := `{"type":"function_call"}`
+						functionCall, _ = sjson.Set(functionCall, "call_id", part.Get("id").String())
+						name := part.Get("name").String()
+						toolMap := buildReverseMapFromClaudeOriginalToShort(inputRawJSON)
+						if short, ok := toolMap[name]; ok {
+							name = short
+						} else {
+							name = shortenNameIfNeeded(name)
+						}
+						functionCall, _ = sjson.Set(functionCall, "name", name)
+						functionCall, _ = sjson.Set(functionCall, "arguments", part.Get("input").Raw)
+						out, _ = sjson.SetRaw(out, "input.-1", functionCall)
+
+					case "tool_result":
+						flushMessage()
+						functionCallOutput := `{"type":"function_call_output"}`
+						functionCallOutput, _ = sjson.Set(functionCallOutput, "call_id", part.Get("tool_use_id").String())
+						functionCallOutput, _ = sjson.Set(functionCallOutput, "output", part.Get("content").String())
+						out, _ = sjson.SetRaw(out, "input.-1", functionCallOutput)
+					}
+					return true
+				})
+				flushMessage()
+			} else if content.Type == gjson.String {
+				appendText(content.String())
+				flushMessage()
+			}
+
+			return true
+		})
 	}
 
-	// 按 CLIProxyAPI 的逻辑：默认 medium，始终设置 reasoning.summary = "auto"
+	// Tool declarations.
+	tools := root.Get("tools")
+	if tools.IsArray() {
+		out, _ = sjson.SetRaw(out, "tools", `[]`)
+		out, _ = sjson.Set(out, "tool_choice", "auto")
+
+		var names []string
+		tools.ForEach(func(_, tool gjson.Result) bool {
+			if name := tool.Get("name").String(); name != "" {
+				names = append(names, name)
+			}
+			return true
+		})
+		shortMap := buildShortNameMap(names)
+
+		tools.ForEach(func(_, tool gjson.Result) bool {
+			if tool.Get("type").String() == "web_search_20250305" {
+				out, _ = sjson.SetRaw(out, "tools.-1", `{"type":"web_search"}`)
+				return true
+			}
+
+			converted := tool.Raw
+			converted, _ = sjson.Set(converted, "type", "function")
+			if v := tool.Get("name"); v.Exists() {
+				name := v.String()
+				if short, ok := shortMap[name]; ok {
+					name = short
+				} else {
+					name = shortenNameIfNeeded(name)
+				}
+				converted, _ = sjson.Set(converted, "name", name)
+			}
+			converted, _ = sjson.SetRaw(converted, "parameters", normalizeToolParameters(tool.Get("input_schema").Raw))
+			converted, _ = sjson.Delete(converted, "input_schema")
+			converted, _ = sjson.Delete(converted, "parameters.$schema")
+			converted, _ = sjson.Set(converted, "strict", false)
+			out, _ = sjson.SetRaw(out, "tools.-1", converted)
+			return true
+		})
+	}
+
+	// Additional Codex-compatible parameters.
+	out, _ = sjson.Set(out, "parallel_tool_calls", true)
+
 	reasoningEffort := thinkingLevelMedium
 	if thinkingConfig := root.Get("thinking"); thinkingConfig.Exists() && thinkingConfig.IsObject() {
-		if thinkingType := thinkingConfig.Get("type"); thinkingType.Exists() {
-			switch thinkingType.String() {
-			case "enabled":
-				if budgetTokens := thinkingConfig.Get("budget_tokens"); budgetTokens.Exists() {
-					if effort, ok := convertBudgetToLevel(int(budgetTokens.Int())); ok && effort != "" {
-						reasoningEffort = effort
-					}
-				}
-			case "adaptive":
-				reasoningEffort = thinkingLevelXHigh
-			case "disabled":
-				if effort, ok := convertBudgetToLevel(0); ok && effort != "" {
+		switch thinkingConfig.Get("type").String() {
+		case "enabled":
+			if budgetTokens := thinkingConfig.Get("budget_tokens"); budgetTokens.Exists() {
+				if effort, ok := convertBudgetToLevel(int(budgetTokens.Int())); ok && effort != "" {
 					reasoningEffort = effort
 				}
+			}
+		case "adaptive":
+			reasoningEffort = thinkingLevelXHigh
+		case "disabled":
+			if effort, ok := convertBudgetToLevel(0); ok && effort != "" {
+				reasoningEffort = effort
 			}
 		}
 	}
 	out, _ = sjson.Set(out, "reasoning.effort", reasoningEffort)
 	out, _ = sjson.Set(out, "reasoning.summary", "auto")
+	out, _ = sjson.Set(out, "stream", stream)
 	out, _ = sjson.Set(out, "store", false)
-
-	if messages := root.Get("messages"); messages.Exists() && messages.IsArray() {
-		messages.ForEach(func(_, message gjson.Result) bool {
-			role := message.Get("role").String()
-			content := message.Get("content")
-
-			msg := `{"role":"","content":[]}`
-			msg, _ = sjson.Set(msg, "role", role)
-			hasContent := false
-
-			switch {
-			case content.Type == gjson.String:
-				text := strings.TrimSpace(content.String())
-				if text != "" {
-					item := `{"type":"input_text","text":""}`
-					item, _ = sjson.Set(item, "text", text)
-					msg, _ = sjson.SetRaw(msg, "content.-1", item)
-					hasContent = true
-				}
-			case content.IsArray():
-				content.ForEach(func(_, part gjson.Result) bool {
-					partType := part.Get("type").String()
-					switch partType {
-					case "text", "thinking":
-						text := part.Get("text").String()
-						if partType == "thinking" {
-							text = getThinkingText(part)
-						}
-						if strings.TrimSpace(text) == "" {
-							return true
-						}
-						item := `{"type":"input_text","text":""}`
-						item, _ = sjson.Set(item, "text", text)
-						msg, _ = sjson.SetRaw(msg, "content.-1", item)
-						hasContent = true
-					case "image":
-						imageURL := ""
-						if source := part.Get("source"); source.Exists() {
-							switch source.Get("type").String() {
-							case "base64":
-								mediaType := source.Get("media_type").String()
-								if mediaType == "" {
-									mediaType = "application/octet-stream"
-								}
-								data := source.Get("data").String()
-								if data != "" {
-									imageURL = "data:" + mediaType + ";base64," + data
-								}
-							case "url":
-								imageURL = source.Get("url").String()
-							}
-						}
-						if imageURL == "" {
-							imageURL = part.Get("url").String()
-						}
-						if imageURL == "" {
-							return true
-						}
-						item := `{"type":"input_image","image_url":""}`
-						item, _ = sjson.Set(item, "image_url", imageURL)
-						msg, _ = sjson.SetRaw(msg, "content.-1", item)
-						hasContent = true
-					case "tool_result":
-						toolText := convertClaudeToolResultContentToString(part.Get("content"))
-						if strings.TrimSpace(toolText) == "" {
-							return true
-						}
-						item := `{"type":"input_text","text":""}`
-						item, _ = sjson.Set(item, "text", toolText)
-						msg, _ = sjson.SetRaw(msg, "content.-1", item)
-						hasContent = true
-					}
-					return true
-				})
-			}
-
-			if hasContent {
-				out, _ = sjson.Set(out, "input.-1", gjson.Parse(msg).Value())
-			}
-			return true
-		})
-	}
-
-	if tools := root.Get("tools"); tools.Exists() && tools.IsArray() {
-		tools.ForEach(func(_, tool gjson.Result) bool {
-			openAITool := `{"type":"function","name":"","description":"","parameters":{}}`
-			openAITool, _ = sjson.Set(openAITool, "name", tool.Get("name").String())
-			openAITool, _ = sjson.Set(openAITool, "description", tool.Get("description").String())
-			if inputSchema := tool.Get("input_schema"); inputSchema.Exists() {
-				openAITool, _ = sjson.Set(openAITool, "parameters", inputSchema.Value())
-			}
-			out, _ = sjson.Set(out, "tools.-1", gjson.Parse(openAITool).Value())
-			return true
-		})
-	}
-
-	if toolChoice := root.Get("tool_choice"); toolChoice.Exists() {
-		switch toolChoice.Get("type").String() {
-		case "auto":
-			out, _ = sjson.Set(out, "tool_choice", "auto")
-		case "any":
-			out, _ = sjson.Set(out, "tool_choice", "required")
-		case "tool":
-			name := toolChoice.Get("name").String()
-			out, _ = sjson.Set(out, "tool_choice", map[string]any{
-				"type": "function",
-				"name": name,
-			})
-		}
-	}
+	out, _ = sjson.Set(out, "include", []string{"reasoning.encrypted_content"})
 
 	return []byte(out)
 }
 
-func convertClaudeToolResultContentToString(content gjson.Result) string {
-	if !content.Exists() {
-		return ""
+func shortenNameIfNeeded(name string) string {
+	const limit = 64
+	if len(name) <= limit {
+		return name
 	}
-
-	if content.Type == gjson.String {
-		return content.String()
-	}
-
-	if content.IsArray() {
-		var parts []string
-		content.ForEach(func(_, item gjson.Result) bool {
-			switch {
-			case item.Type == gjson.String:
-				parts = append(parts, item.String())
-			case item.IsObject() && item.Get("text").Exists() && item.Get("text").Type == gjson.String:
-				parts = append(parts, item.Get("text").String())
-			default:
-				parts = append(parts, item.Raw)
+	if strings.HasPrefix(name, "mcp__") {
+		idx := strings.LastIndex(name, "__")
+		if idx > 0 {
+			cand := "mcp__" + name[idx+2:]
+			if len(cand) > limit {
+				return cand[:limit]
 			}
-			return true
-		})
-		joined := strings.Join(parts, "\n\n")
-		if strings.TrimSpace(joined) != "" {
-			return joined
+			return cand
 		}
-		return content.Raw
+	}
+	return name[:limit]
+}
+
+func buildShortNameMap(names []string) map[string]string {
+	const limit = 64
+	used := map[string]struct{}{}
+	result := map[string]string{}
+
+	baseCandidate := func(n string) string {
+		if len(n) <= limit {
+			return n
+		}
+		if strings.HasPrefix(n, "mcp__") {
+			idx := strings.LastIndex(n, "__")
+			if idx > 0 {
+				cand := "mcp__" + n[idx+2:]
+				if len(cand) > limit {
+					cand = cand[:limit]
+				}
+				return cand
+			}
+		}
+		return n[:limit]
 	}
 
-	if content.IsObject() {
-		if text := content.Get("text"); text.Exists() && text.Type == gjson.String {
-			return text.String()
+	makeUnique := func(cand string) string {
+		if _, ok := used[cand]; !ok {
+			return cand
 		}
-		return content.Raw
+		base := cand
+		for i := 1; ; i++ {
+			suffix := "_" + strconv.Itoa(i)
+			allowed := limit - len(suffix)
+			if allowed < 0 {
+				allowed = 0
+			}
+			tmp := base
+			if len(tmp) > allowed {
+				tmp = tmp[:allowed]
+			}
+			tmp += suffix
+			if _, ok := used[tmp]; !ok {
+				return tmp
+			}
+		}
 	}
 
-	return content.Raw
+	for _, n := range names {
+		cand := baseCandidate(n)
+		uniq := makeUnique(cand)
+		used[uniq] = struct{}{}
+		result[n] = uniq
+	}
+
+	return result
+}
+
+func buildReverseMapFromClaudeOriginalToShort(original []byte) map[string]string {
+	tools := gjson.GetBytes(original, "tools")
+	result := map[string]string{}
+	if !tools.IsArray() {
+		return result
+	}
+
+	var names []string
+	tools.ForEach(func(_, tool gjson.Result) bool {
+		if n := tool.Get("name").String(); n != "" {
+			names = append(names, n)
+		}
+		return true
+	})
+
+	if len(names) > 0 {
+		result = buildShortNameMap(names)
+	}
+	return result
+}
+
+func normalizeToolParameters(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" || !gjson.Valid(raw) {
+		return `{"type":"object","properties":{}}`
+	}
+
+	schema := raw
+	parsed := gjson.Parse(raw)
+	schemaType := parsed.Get("type").String()
+	if schemaType == "" {
+		schema, _ = sjson.Set(schema, "type", "object")
+		schemaType = "object"
+	}
+	if schemaType == "object" && !parsed.Get("properties").Exists() {
+		schema, _ = sjson.SetRaw(schema, "properties", `{}`)
+	}
+	return schema
 }

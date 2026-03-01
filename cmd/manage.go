@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"ccx/internal"
+	"ccx/internal/proxy"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -48,10 +51,11 @@ var addCmd = &cobra.Command{
 			template := map[string]interface{}{
 				"api_format": "anthropic",
 				"env": map[string]string{
-					"ANTHROPIC_API_KEY":    "",
-					"ANTHROPIC_AUTH_TOKEN": "",
-					"ANTHROPIC_BASE_URL":   "",
-					"API_TIMEOUT_MS":       "600000",
+					"ANTHROPIC_API_KEY":       "",
+					"ANTHROPIC_AUTH_TOKEN":    "",
+					"ANTHROPIC_BASE_URL":      "",
+					"OPENAI_REASONING_EFFORT": "",
+					"API_TIMEOUT_MS":          "600000",
 				},
 			}
 			tmpl, _ := json.MarshalIndent(template, "", "  ")
@@ -131,15 +135,23 @@ func interactiveAddProfile() ([]byte, error) {
 	}
 
 	baseURL := internal.PromptInput("ANTHROPIC_BASE_URL", "")
-	if baseURL == "" {
-		return nil, fmt.Errorf("Base URL 不能为空")
+	baseURL, err = promptAndNormalizeBaseURL(baseURL)
+	if err != nil {
+		return nil, err
 	}
 
-	model := internal.PromptInput("ANTHROPIC_MODEL（留空不设置）", "")
+	model := selectOrInputModel(baseURL, token)
 	haikuModel := internal.PromptInput("ANTHROPIC_DEFAULT_HAIKU_MODEL（留空不设置）", "")
 	sonnetModel := internal.PromptInput("ANTHROPIC_DEFAULT_SONNET_MODEL（留空不设置）", "")
 	opusModel := internal.PromptInput("ANTHROPIC_DEFAULT_OPUS_MODEL（留空不设置）", "")
 	timeout := internal.PromptInput("API_TIMEOUT_MS", "600000")
+	reasoningEffort := ""
+	if apiFormat == "openai" {
+		reasoningEffort, err = promptReasoningEffort("")
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	env := map[string]string{
 		"ANTHROPIC_API_KEY":    token,
@@ -159,6 +171,9 @@ func interactiveAddProfile() ([]byte, error) {
 	if opusModel != "" {
 		env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = opusModel
 	}
+	if reasoningEffort != "" {
+		env["OPENAI_REASONING_EFFORT"] = reasoningEffort
+	}
 
 	settings := map[string]interface{}{
 		"env": env,
@@ -171,6 +186,62 @@ func interactiveAddProfile() ([]byte, error) {
 	fmt.Println("\n生成的配置：")
 	fmt.Println(string(content))
 	return content, nil
+}
+
+func promptAndNormalizeBaseURL(initial string) (string, error) {
+	current := initial
+	for {
+		if strings.TrimSpace(current) == "" {
+			current = internal.PromptInput("ANTHROPIC_BASE_URL（建议以 /v1 结尾）", "")
+		}
+
+		normalized, warning, err := normalizeBaseURL(current)
+		if err == nil {
+			if warning != "" {
+				fmt.Printf("提示: %s\n", warning)
+			}
+			return normalized, nil
+		}
+		fmt.Printf("Base URL 无效: %v\n", err)
+		current = ""
+	}
+}
+
+func normalizeBaseURL(raw string) (normalized string, warning string, err error) {
+	baseURL := strings.TrimSpace(raw)
+	if baseURL == "" {
+		return "", "", fmt.Errorf("Base URL 不能为空")
+	}
+
+	// Keep canonical format in config.
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", "", fmt.Errorf("格式错误，示例: https://api.example.com/v1")
+	}
+
+	if !strings.HasSuffix(u.Path, "/v1") {
+		return baseURL, "该地址不是 /v1 结尾，模型自动发现可能失败，建议使用 .../v1", nil
+	}
+	return baseURL, "", nil
+}
+
+func promptReasoningEffort(initial string) (string, error) {
+	current := initial
+	for {
+		if strings.TrimSpace(current) == "" {
+			current = internal.PromptInput("OPENAI_REASONING_EFFORT（none/auto/minimal/low/medium/high/xhigh，留空不设置）", "")
+		}
+
+		normalized, ok := proxy.NormalizeReasoningEffort(current)
+		if ok {
+			return normalized, nil
+		}
+
+		fmt.Println("思考档位无效，允许值: none|auto|minimal|low|medium|high|xhigh")
+		current = ""
+	}
 }
 
 // editProfile 从 Gist 下载 → 编辑器编辑 → 上传回 Gist

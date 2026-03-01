@@ -1,34 +1,23 @@
-# CCX — Claude Code eXecutor
+# CCX
 
-管理多套 Claude Code API 配置，一键切换，即时启动。
+`ccx` 用于管理多套 Claude Code 配置并快速切换启动。
 
-所有配置存储在 [Gitee Gist](https://gitee.com/dashboard/codes) 云端，跨机器同步，本地零存储。
+配置存储在 **Gitee Gist**，本地仅保存 Gist 连接信息；支持两种运行模式：
+- `anthropic`：直连 Claude 兼容接口
+- `openai`：通过本地代理把 Claude Messages 协议转换到 OpenAI/Codex `POST /v1/responses`
 
 ## 功能特性
 
-- **云端配置管理** — 配置文件以 JSON 形式存储在 Gitee Gist，任何机器 `ccx init` 即可使用
-- **交互式选择器** — 上下键选择 profile，支持搜索过滤
-- **完整 CRUD** — 新建、编辑、删除、查看、设置默认配置
-- **透明启动** — 通过 `syscall.Exec` 直接替换进程为 `claude`，无子进程开销
-- **非 TTY 兼容** — 在 IDE Run Panel 等非终端环境自动回退为数字编号选择
+- 云端配置管理：profile 存储在 Gitee Gist（`settings-<name>.json`）
+- 交互式启动：支持默认配置、非 TTY 数字回退
+- 配置 CRUD：`add / edit / remove / info / list / default`
+- OpenAI 模式本地代理：固定上游 `/responses`，不回退 `/chat/completions`
+- 模型自动发现：`ccx add` 会请求 `/models`（失败自动回退手填）
+- Claude CLI 透传：与 `ccx` 命令不冲突时，自动透传到 `claude`
+- 思考强度配置：`OPENAI_REASONING_EFFORT`（严格档位）
+- 鉴权安全输出：启动摘要 token 脱敏（前 8 位 + `***`）
 
 ## 安装
-
-### 通过 npm（推荐）
-
-```bash
-npm install -g claude-ccx
-```
-
-### 通过 GitHub Releases
-
-从 [Releases](https://github.com/fanxing-6/ccx/releases) 下载 `ccx_linux_amd64.tar.gz`：
-
-```bash
-curl -Lo ccx.tar.gz https://github.com/fanxing-6/ccx/releases/latest/download/ccx_linux_amd64.tar.gz
-tar -xzf ccx.tar.gz
-sudo mv ccx /usr/local/bin/
-```
 
 ### 从源码构建
 
@@ -38,142 +27,179 @@ cd ccx
 go build -o ccx .
 ```
 
+### npm
+
+```bash
+npm install -g claude-ccx
+```
+
 ## 前置条件
 
-1. **Claude Code CLI** 已安装并在 `$PATH` 中（[安装文档](https://docs.anthropic.com/en/docs/claude-code)）
-2. **Gitee 账号** 及 Personal Access Token（需要 Gist 读写权限）
-3. **一个 Gitee Gist** 用于存储配置（在 [gitee.com/dashboard/codes](https://gitee.com/dashboard/codes) 创建）
+1. 已安装 Claude Code CLI（默认命令名 `claude`）
+2. 有可读写 Gitee Gist 的 Token
+3. 已创建用于保存 profile 的 Gitee Gist
 
-## 快速开始
-
-### 1. 初始化
+## 初始化
 
 ```bash
 ccx init
 ```
 
-按提示输入：
-- Gitee Personal Access Token
-- Gitee 用户名
-- Gist ID（Gist URL 中 `codes/` 后面的部分）
-- Claude 命令名（默认 `claude`）
+会写入 `~/.config/ccx/config.json`（不包含 profile）：
 
-### 2. 添加配置
-
-```bash
-ccx add my-api
+```json
+{
+  "gitee_token": "...",
+  "gist_id": "...",
+  "gist_owner": "...",
+  "claude_command": "claude",
+  "default_profile": ""
+}
 ```
 
-交互式引导输入 API Token、Base URL、模型等参数。也可用编辑器模式：
+## 使用方式
+
+### 新建配置
 
 ```bash
-ccx add my-api --editor
+ccx add <name>
 ```
 
-### 3. 启动
+交互式创建支持：
+- 选择 `api_format`（`anthropic` / `openai`）
+- 输入 Base URL（会去掉末尾 `/`，非 `/v1` 仅提示不拦截）
+- 自动拉取模型并分页选择（失败回退手填）
+- `openai` 模式下可配置 `OPENAI_REASONING_EFFORT`
+
+编辑器模式：
 
 ```bash
-# 交互式选择
+ccx add <name> --editor
+```
+
+### 启动
+
+```bash
+# 交互式选择 profile
 ccx
 
 # 直接指定 profile
-ccx my-api
+ccx <name>
 
-# 危险模式（跳过权限确认）
-ccx -d my-api
+# 危险模式
+ccx -d <name>
 ```
 
-## 命令参考
+### 管理
 
-| 命令 | 说明 |
-|------|------|
-| `ccx` | 交互式选择 profile 并启动 Claude Code |
-| `ccx <name>` | 直接使用指定 profile 启动 |
-| `ccx init` | 初始化 Gitee 连接配置 |
-| `ccx list` | 列出所有 profile |
-| `ccx info <name>` | 查看 profile 详情 |
-| `ccx add <name>` | 创建新 profile（交互式引导） |
-| `ccx add <name> --editor` | 创建新 profile（编辑器模式） |
-| `ccx edit <name>` | 编辑已有 profile |
-| `ccx remove <name>` | 删除 profile |
-| `ccx default <name>` | 设置默认 profile |
+```bash
+ccx list
+ccx info <name>
+ccx edit <name>
+ccx remove <name>
+ccx default <name>
+```
 
-**别名**: `list` → `ls`，`remove` → `rm`
+## OpenAI 代理模式（重点）
 
-**全局 Flag**: `-d` / `--dangerous` — 为 claude 追加 `--dangerously-skip-permissions`
+当 profile 的 `api_format` 为 `openai` 时：
 
-## 配置结构
+1. `ccx` 启动本地代理（`127.0.0.1:随机端口`）
+2. Claude Code 请求本地 `/v1/messages`
+3. 代理转换后转发到上游 `POST <ANTHROPIC_BASE_URL>/responses`
+4. 上游响应再转换回 Anthropic 事件返回给 Claude Code
 
-### Profile（存储在 Gitee Gist）
+说明：
+- 当前设计仅支持 `/v1/responses` 路径
+- 上游请求会同时带：
+  - `Authorization: Bearer <token>`
+  - `X-Api-Key: <token>`
 
-每个 profile 是一个 `settings-<name>.json` 文件，内容即 `claude --settings` 接受的 JSON：
+## 思考强度（OPENAI_REASONING_EFFORT）
+
+仅在 `api_format=openai` 的本地代理路径生效。
+
+可选值：
+- `none`
+- `auto`
+- `minimal`
+- `low`
+- `medium`
+- `high`
+- `xhigh`
+
+行为规则：
+- profile 配置非法值：启动时 fail-fast 报错
+- 若请求已显式带 `thinking`：代理不覆盖
+- 若请求未带 `thinking`：代理按档位注入默认 `thinking`
+
+映射（与 CLIProxyAPI 语义一致）：
+- `none` -> `thinking.type=disabled`
+- `auto` -> `thinking.type=enabled, budget_tokens=-1`
+- `minimal` -> `512`
+- `low` -> `1024`
+- `medium` -> `8192`
+- `high` -> `24576`
+- `xhigh` -> `32768`
+
+## 命令透传
+
+当参数不属于 `ccx` 自有命令，且符合透传规则时，`ccx` 会直接执行 `claude ...`。
+
+示例：
+
+```bash
+ccx auth status
+ccx update
+ccx -- -p "hello"
+ccx -d auth status
+```
+
+内置透传顶级命令：
+- `auth`
+- `update`
+- `mcp`
+- `agents`
+- `remote-control`
+
+## Profile 示例
+
+### anthropic（默认）
 
 ```json
 {
   "env": {
-    "ANTHROPIC_AUTH_TOKEN": "sk-xxx",
+    "ANTHROPIC_API_KEY": "sk-...",
+    "ANTHROPIC_AUTH_TOKEN": "sk-...",
     "ANTHROPIC_BASE_URL": "https://api.example.com/v1",
     "ANTHROPIC_MODEL": "claude-sonnet-4-20250514",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "",
     "API_TIMEOUT_MS": "600000"
   }
 }
 ```
 
-### 本地配置（`~/.config/ccx/config.json`）
-
-仅存储 Gitee 连接信息，不含任何 profile 数据：
+### openai（responses 代理）
 
 ```json
 {
-  "gitee_token": "your-token",
-  "gist_id": "your-gist-id",
-  "gist_owner": "your-username",
-  "claude_command": "claude",
-  "default_profile": "my-api"
+  "api_format": "openai",
+  "env": {
+    "ANTHROPIC_API_KEY": "sk-...",
+    "ANTHROPIC_AUTH_TOKEN": "sk-...",
+    "ANTHROPIC_BASE_URL": "https://api.linkflow.run/v1",
+    "ANTHROPIC_MODEL": "gpt-5.3-codex",
+    "OPENAI_REASONING_EFFORT": "high",
+    "API_TIMEOUT_MS": "600000"
+  }
 }
 ```
 
-## 交互式界面
-
-```
-选择 Claude Code 配置:
-  ▸ volc                api.volc.com/v1           [claude-sonnet-4-20250514]
-    openai              api.openai.com/v1         [gpt-4]
-    local               localhost:8080
-    ⚙ 配置管理
-```
-
-选择「⚙ 配置管理」进入二级菜单，可新建、修改、删除配置或设置默认值，操作完成后自动返回。
-
-## 适用场景
-
-- 有多个 API 供应商（官方、中转、自建）需要频繁切换
-- 需要在不同机器间共享 Claude Code 配置
-- 希望用不同模型配置应对不同任务
-
-## 卸载
+## 运行与测试
 
 ```bash
-# npm 方式
-npm uninstall -g claude-ccx
-
-# 手动安装方式
-rm /usr/local/bin/ccx
+go test ./...
+go build -o ccx .
 ```
-
-卸载后本地配置文件不会自动删除（含 Gitee Token），如需彻底清理：
-
-```bash
-rm -rf ~/.config/ccx
-```
-
-## 系统要求
-
-- Linux amd64
-- Node.js 14+（仅 npm 安装方式需要）
 
 ## License
 
