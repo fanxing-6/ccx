@@ -36,8 +36,10 @@ npm install -g claude-ccx
 ## 前置条件
 
 1. 已安装 Claude Code CLI（默认命令名 `claude`）
-2. 有可读写 Gitee Gist 的 Token
-3. 已创建用于保存 profile 的 Gitee Gist
+2. 有可读写 Gitee Gist 的 Token（Personal Access Token）
+3. 已创建用于保存 profile 的 Gitee Gist（https://gitee.com/dashboard/codes）
+   - Gist URL 形如: https://gitee.com/<owner>/codes/<gistID>
+   - 其中 <gistID> 即 `ccx init` 里要输入的 Gist ID
 
 ## 初始化
 

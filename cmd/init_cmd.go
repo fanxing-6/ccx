@@ -21,6 +21,10 @@ var initCmd = &cobra.Command{
 
 func initRun() error {
 	fmt.Println("=== CCX 初始化 ===")
+	fmt.Println("准备工作（需要浏览器操作）：")
+	fmt.Println("  1) 创建/查看 Gist: https://gitee.com/dashboard/codes")
+	fmt.Println("  2) Gist URL 形如 https://gitee.com/<owner>/codes/<gistID>")
+	fmt.Println("     其中 <gistID> 就是下面要输入的 Gist ID")
 
 	// 加载已有配置（如果存在）
 	existing, _ := internal.LoadAppConfig()
@@ -42,7 +46,7 @@ func initRun() error {
 	}
 
 	owner := internal.PromptInput("Gitee 用户名", defaultOwner)
-	gistID := internal.PromptInput("Gist ID（codes 路径中的 ID）", defaultGistID)
+	gistID := internal.PromptInput("Gist ID（例：https://gitee.com/<owner>/codes/<gistID> 中的 <gistID>）", defaultGistID)
 	claudeCmd := internal.PromptInput("Claude 命令名", defaultCmd)
 
 	cfg := &internal.AppConfig{
@@ -57,7 +61,12 @@ func initRun() error {
 	client := internal.NewGistClientFromConfig(cfg)
 	files, err := client.ListSettingsFiles()
 	if err != nil {
-		return fmt.Errorf("连接 Gitee 失败: %w", err)
+		return fmt.Errorf(
+			"连接 Gitee 失败: %w\n\n排查建议:\n- 打开并核对 Gist 页面: https://gitee.com/%s/codes/%s\n- 确认 Token 有 Gist 读写权限\n- dashboard: https://gitee.com/dashboard/codes",
+			err,
+			owner,
+			gistID,
+		)
 	}
 	fmt.Printf("连接成功，发现 %d 个配置文件\n", len(files))
 

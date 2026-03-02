@@ -79,7 +79,15 @@ var addCmd = &cobra.Command{
 		filename := internal.ProfileNameToGistFile(name)
 		err = client.UploadFile(filename, string(content))
 		if err != nil {
-			return fmt.Errorf("上传到 Gitee Gist 失败: %w", err)
+			return fmt.Errorf(
+				"上传到 Gitee Gist 失败: %w\n\n排查建议:\n- 打开并核对 Gist 页面: https://gitee.com/%s/codes/%s\n- （可选）检查目标文件: https://gitee.com/%s/codes/%s/raw?blob_name=%s\n- 确认 Token 有 Gist 写权限\n- dashboard: https://gitee.com/dashboard/codes",
+				err,
+				cfg.GistOwner,
+				cfg.GistID,
+				cfg.GistOwner,
+				cfg.GistID,
+				filename,
+			)
 		}
 		fmt.Printf("配置 %s 已创建到 Gitee Gist\n", name)
 		return nil
@@ -271,7 +279,15 @@ func editProfile(name string) error {
 	filename := internal.ProfileNameToGistFile(name)
 	err = client.UploadFile(filename, string(edited))
 	if err != nil {
-		return fmt.Errorf("上传到 Gitee Gist 失败: %w", err)
+		return fmt.Errorf(
+			"上传到 Gitee Gist 失败: %w\n\n排查建议:\n- 打开并核对 Gist 页面: https://gitee.com/%s/codes/%s\n- （可选）检查目标文件: https://gitee.com/%s/codes/%s/raw?blob_name=%s\n- 确认 Token 有 Gist 写权限\n- dashboard: https://gitee.com/dashboard/codes",
+			err,
+			cfg.GistOwner,
+			cfg.GistID,
+			cfg.GistOwner,
+			cfg.GistID,
+			filename,
+		)
 	}
 	fmt.Printf("配置 %s 已更新到 Gitee Gist\n", name)
 	return nil
@@ -301,7 +317,12 @@ func removeProfile(name string) error {
 	filename := internal.ProfileNameToGistFile(name)
 	err = client.DeleteFile(filename)
 	if err != nil {
-		return fmt.Errorf("删除失败: %w", err)
+		return fmt.Errorf(
+			"删除失败: %w\n\n排查建议:\n- 打开并核对 Gist 页面: https://gitee.com/%s/codes/%s\n- 确认 Token 有 Gist 写权限\n- dashboard: https://gitee.com/dashboard/codes",
+			err,
+			cfg.GistOwner,
+			cfg.GistID,
+		)
 	}
 	fmt.Printf("配置 %s 已从 Gitee Gist 删除\n", name)
 	return nil
@@ -370,7 +391,15 @@ func configMenuAdd() error {
 	filename := internal.ProfileNameToGistFile(name)
 	err = client.UploadFile(filename, string(content))
 	if err != nil {
-		return fmt.Errorf("上传到 Gitee Gist 失败: %w", err)
+		return fmt.Errorf(
+			"上传到 Gitee Gist 失败: %w\n\n排查建议:\n- 打开并核对 Gist 页面: https://gitee.com/%s/codes/%s\n- （可选）检查目标文件: https://gitee.com/%s/codes/%s/raw?blob_name=%s\n- 确认 Token 有 Gist 写权限\n- dashboard: https://gitee.com/dashboard/codes",
+			err,
+			cfg.GistOwner,
+			cfg.GistID,
+			cfg.GistOwner,
+			cfg.GistID,
+			filename,
+		)
 	}
 	fmt.Printf("配置 %s 已创建到 Gitee Gist\n", name)
 	return nil

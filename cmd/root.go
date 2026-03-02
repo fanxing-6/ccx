@@ -41,6 +41,8 @@ var rootCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !internal.ConfigExists() {
 			fmt.Println("首次使用，请先初始化配置：")
+			fmt.Println("  打开 https://gitee.com/dashboard/codes 创建/选择 Gist")
+			fmt.Println("  Gist URL 示例: https://gitee.com/<owner>/codes/<gistID>")
 			return initRun()
 		}
 
