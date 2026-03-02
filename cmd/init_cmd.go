@@ -71,7 +71,9 @@ func initRun() error {
 	fmt.Printf("连接成功，发现 %d 个配置文件\n", len(files))
 
 	// 保存配置
-	internal.SaveAppConfig(cfg)
+	if err := internal.SaveAppConfig(cfg); err != nil {
+		return err
+	}
 	fmt.Printf("配置已保存到 %s\n", internal.ConfigPath())
 
 	return nil

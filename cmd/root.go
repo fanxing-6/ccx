@@ -67,7 +67,11 @@ var rootCmd = &cobra.Command{
 					return fmt.Errorf("Gitee Gist 中没有配置，运行 ccx add <name> 创建")
 				}
 
-				cfg, _ = internal.LoadAppConfig()
+				cfgReloaded, err := internal.LoadAppConfig()
+				if err != nil {
+					return err
+				}
+				cfg = cfgReloaded
 
 				selected, err := selectProfileOrConfig(profiles, cfg.DefaultProfile)
 				if err != nil {
@@ -278,10 +282,20 @@ func buildClaudeSettings(original json.RawMessage, token, forceBaseURL string) (
 		env = typed
 	}
 
+	// 根据原始配置中的字段来决定保留哪个（互斥）
+	_, hasAPIKey := env["ANTHROPIC_API_KEY"]
+	_, hasAuthToken := env["ANTHROPIC_AUTH_TOKEN"]
 	if token != "" {
-		env["ANTHROPIC_API_KEY"] = token
+		if hasAuthToken && !hasAPIKey {
+			env["ANTHROPIC_AUTH_TOKEN"] = token
+		} else {
+			env["ANTHROPIC_API_KEY"] = token
+			delete(env, "ANTHROPIC_AUTH_TOKEN")
+		}
+	} else {
+		delete(env, "ANTHROPIC_API_KEY")
+		delete(env, "ANTHROPIC_AUTH_TOKEN")
 	}
-	delete(env, "ANTHROPIC_AUTH_TOKEN")
 	if forceBaseURL != "" {
 		env["ANTHROPIC_BASE_URL"] = forceBaseURL
 	}

@@ -137,7 +137,17 @@ func interactiveAddProfile() ([]byte, error) {
 		return nil, err
 	}
 
-	token := internal.PromptPassword("API Token（将写入 ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN）")
+	// 选择认证方式（二选一）
+	authChoices := []internal.ActionItem{
+		{Label: "ANTHROPIC_API_KEY（第三方/代理端点）", Key: "api_key"},
+		{Label: "ANTHROPIC_AUTH_TOKEN（标准 Anthropic）", Key: "auth_token"},
+	}
+	authType, err := internal.SelectAction("选择认证方式", authChoices)
+	if err != nil {
+		return nil, fmt.Errorf("选择认证方式失败: %w", err)
+	}
+
+	token := internal.PromptPassword("API Token")
 	if token == "" {
 		return nil, fmt.Errorf("Token 不能为空")
 	}
@@ -162,10 +172,13 @@ func interactiveAddProfile() ([]byte, error) {
 	}
 
 	env := map[string]string{
-		"ANTHROPIC_API_KEY":    token,
-		"ANTHROPIC_AUTH_TOKEN": token,
-		"ANTHROPIC_BASE_URL":   baseURL,
-		"API_TIMEOUT_MS":       timeout,
+		"ANTHROPIC_BASE_URL": baseURL,
+		"API_TIMEOUT_MS":     timeout,
+	}
+	if authType == "api_key" {
+		env["ANTHROPIC_API_KEY"] = token
+	} else {
+		env["ANTHROPIC_AUTH_TOKEN"] = token
 	}
 	if model != "" {
 		env["ANTHROPIC_MODEL"] = model
@@ -324,6 +337,16 @@ func removeProfile(name string) error {
 			cfg.GistID,
 		)
 	}
+
+	if cfg.DefaultProfile == name {
+		cfg.DefaultProfile = ""
+		if err := internal.SaveAppConfig(cfg); err != nil {
+			return err
+		}
+		fmt.Printf("配置 %s 已从 Gitee Gist 删除，并已清空默认配置\n", name)
+		return nil
+	}
+
 	fmt.Printf("配置 %s 已从 Gitee Gist 删除\n", name)
 	return nil
 }
@@ -508,7 +531,9 @@ func configMenuDefault() error {
 	}
 
 	cfg.DefaultProfile = selected
-	internal.SaveAppConfig(cfg)
+	if err := internal.SaveAppConfig(cfg); err != nil {
+		return err
+	}
 	fmt.Printf("默认配置已设置为: %s\n", selected)
 	return nil
 }
@@ -522,8 +547,13 @@ func openEditor(content []byte) ([]byte, error) {
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	tmpFile.Write(content)
-	tmpFile.Close()
+	if _, err := tmpFile.Write(content); err != nil {
+		_ = tmpFile.Close()
+		return nil, fmt.Errorf("写入临时文件失败: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return nil, fmt.Errorf("关闭临时文件失败: %w", err)
+	}
 
 	editor := os.Getenv("EDITOR")
 	if editor == "" {

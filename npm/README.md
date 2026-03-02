@@ -2,7 +2,7 @@
 
 管理多套 Claude Code API 配置，一键切换，即时启动。
 
-所有配置存储在 [Gitee Gist](https://gitee.com/dashboard/codes) 云端，跨机器同步，本地零存储。
+Profile 配置存储在 [Gitee Gist](https://gitee.com/dashboard/codes) 云端并可跨机器同步；本地会保存 Gitee 连接信息（含 Token）到 `~/.config/ccx/config.json`。
 
 ## 功能特性
 

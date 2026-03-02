@@ -7,9 +7,13 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 )
 
-const giteeAPIBase = "https://gitee.com/api/v5"
+const (
+	giteeAPIBase        = "https://gitee.com/api/v5"
+	defaultGiteeTimeout = 30 * time.Second
+)
 
 // GistClient 封装 Gitee Gist API 操作
 type GistClient struct {
@@ -32,7 +36,7 @@ func NewGistClient(token, owner, gistID string) *GistClient {
 		Token:  token,
 		GistID: gistID,
 		Owner:  owner,
-		client: &http.Client{},
+		client: &http.Client{Timeout: defaultGiteeTimeout},
 	}
 }
 
@@ -43,8 +47,16 @@ func NewGistClientFromConfig(cfg *AppConfig) *GistClient {
 
 // ListSettingsFiles 获取 Gist 中所有 settings-*.json 文件
 func (g *GistClient) ListSettingsFiles() (map[string]GistFile, error) {
-	url := fmt.Sprintf("%s/gists/%s?access_token=%s", giteeAPIBase, g.GistID, g.Token)
-	resp, err := g.client.Get(url)
+	url := fmt.Sprintf("%s/gists/%s", giteeAPIBase, g.GistID)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("构造 Gitee API 请求失败: %w", err)
+	}
+	if strings.TrimSpace(g.Token) != "" {
+		req.Header.Set("Authorization", "token "+g.Token)
+	}
+
+	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("请求 Gitee API 失败: %w", err)
 	}
@@ -58,7 +70,9 @@ func (g *GistClient) ListSettingsFiles() (map[string]GistFile, error) {
 	var gist struct {
 		Files map[string]GistFile `json:"files"`
 	}
-	json.NewDecoder(resp.Body).Decode(&gist)
+	if err := json.NewDecoder(resp.Body).Decode(&gist); err != nil {
+		return nil, fmt.Errorf("解析 Gitee API 响应失败: %w", err)
+	}
 
 	// 过滤出 settings-*.json 文件
 	result := make(map[string]GistFile)
@@ -139,16 +153,24 @@ func (g *GistClient) DownloadFile(filename string) ([]byte, error) {
 func (g *GistClient) UploadFile(filename string, content string) error {
 	url := fmt.Sprintf("%s/gists/%s", giteeAPIBase, g.GistID)
 	payload := map[string]interface{}{
-		"access_token": g.Token,
 		"files": map[string]interface{}{
 			filename: map[string]string{
 				"content": content,
 			},
 		},
 	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("PATCH", url, strings.NewReader(string(body)))
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化上传请求失败: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPatch, url, strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("构造上传请求失败: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(g.Token) != "" {
+		req.Header.Set("Authorization", "token "+g.Token)
+	}
 
 	resp, err := g.client.Do(req)
 	if err != nil {
@@ -167,14 +189,22 @@ func (g *GistClient) UploadFile(filename string, content string) error {
 func (g *GistClient) DeleteFile(filename string) error {
 	url := fmt.Sprintf("%s/gists/%s", giteeAPIBase, g.GistID)
 	payload := map[string]interface{}{
-		"access_token": g.Token,
 		"files": map[string]interface{}{
 			filename: nil,
 		},
 	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("PATCH", url, strings.NewReader(string(body)))
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化删除请求失败: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPatch, url, strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("构造删除请求失败: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(g.Token) != "" {
+		req.Header.Set("Authorization", "token "+g.Token)
+	}
 
 	resp, err := g.client.Do(req)
 	if err != nil {

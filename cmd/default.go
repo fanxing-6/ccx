@@ -33,7 +33,9 @@ var defaultCmd = &cobra.Command{
 		}
 
 		cfg.DefaultProfile = name
-		internal.SaveAppConfig(cfg)
+		if err := internal.SaveAppConfig(cfg); err != nil {
+			return err
+		}
 		fmt.Printf("默认配置已设置为: %s\n", name)
 		return nil
 	},

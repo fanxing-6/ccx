@@ -44,8 +44,8 @@ func ConfigPath() string {
 }
 
 // EnsureDirs 确保配置目录存在
-func EnsureDirs() {
-	os.MkdirAll(ConfigDir(), 0755)
+func EnsureDirs() error {
+	return os.MkdirAll(ConfigDir(), 0755)
 }
 
 // LoadAppConfig 加载主配置文件
@@ -55,7 +55,9 @@ func LoadAppConfig() (*AppConfig, error) {
 		return nil, fmt.Errorf("未找到配置文件，请先运行 ccx init: %w", err)
 	}
 	var cfg AppConfig
-	json.Unmarshal(data, &cfg)
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("解析配置文件失败 %s: %w", ConfigPath(), err)
+	}
 	if cfg.ClaudeCmd == "" {
 		cfg.ClaudeCmd = "claude"
 	}
@@ -63,10 +65,18 @@ func LoadAppConfig() (*AppConfig, error) {
 }
 
 // SaveAppConfig 保存主配置文件
-func SaveAppConfig(cfg *AppConfig) {
-	EnsureDirs()
-	data, _ := json.MarshalIndent(cfg, "", "  ")
-	os.WriteFile(ConfigPath(), data, 0600)
+func SaveAppConfig(cfg *AppConfig) error {
+	if err := EnsureDirs(); err != nil {
+		return fmt.Errorf("创建配置目录失败: %w", err)
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+	if err := os.WriteFile(ConfigPath(), data, 0600); err != nil {
+		return fmt.Errorf("写入配置文件失败 %s: %w", ConfigPath(), err)
+	}
+	return nil
 }
 
 // ConfigExists 检查配置文件是否存在
