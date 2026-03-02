@@ -106,6 +106,19 @@ ccx info <name>
 ccx edit <name>
 ccx remove <name>
 ccx default <name>
+ccx self-update  # 检查并更新到最新版本
+```
+
+### 更新
+
+**npm 安装方式:**
+```bash
+npm update -g claude-ccx
+```
+
+**直接二进制安装:**
+```bash
+ccx self-update
 ```
 
 ## OpenAI 代理模式（重点）

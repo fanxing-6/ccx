@@ -7,6 +7,8 @@ const { execSync } = require("child_process");
 const pkg = require("./package.json");
 const version = pkg.version;
 
+const GITHUB_API_URL = "https://api.github.com/repos/fanxing-6/ccx/releases/latest";
+
 const BINARY_NAME = "ccx";
 const DOWNLOAD_URL = `https://github.com/fanxing-6/ccx/releases/download/v${version}/ccx_linux_amd64.tar.gz`;
 
@@ -38,6 +40,13 @@ function followRedirects(url, maxRedirects = 5) {
   });
 }
 
+const BINARY_NAME = "ccx";
+const DOWNLOAD_URL = `https://github.com/fanxing-6/ccx/releases/download/v${version}/ccx_linux_amd64.tar.gz`;
+
+const binDir = path.join(__dirname, "bin");
+const binPath = path.join(binDir, BINARY_NAME);
+const tmpFile = path.join(__dirname, "ccx.tar.gz");
+
 async function install() {
   if (process.platform !== "linux" || process.arch !== "x64") {
     console.error(`ccx 目前仅支持 linux/x64，当前平台: ${process.platform}/${process.arch}`);
@@ -68,7 +77,62 @@ async function install() {
   console.log(`ccx v${version} 安装成功: ${binPath}`);
 }
 
-install().catch((err) => {
+async function checkLatestVersion() {
+  return new Promise((resolve) => {
+    https
+      .get(
+        GITHUB_API_URL,
+        {
+          headers: {
+            "User-Agent": "claude-ccx-installer",
+          },
+        },
+        (res) => {
+          if (res.statusCode !== 200) {
+            resolve(null);
+            return;
+          }
+          let data = "";
+          res.on("data", (chunk) => (data += chunk));
+          res.on("end", () => {
+            try {
+              const release = JSON.parse(data);
+              const latestVersion = release.tag_name.replace(/^v/, "");
+              const currentVersion = version;
+              if (latestVersion !== currentVersion) {
+                resolve(latestVersion);
+              } else {
+                resolve(null);
+              }
+            } catch {
+              resolve(null);
+            }
+          });
+        }
+      )
+      .on("error", () => resolve(null))
+      .setTimeout(3000, function () {
+        this.destroy();
+        resolve(null);
+      });
+  });
+}
+
+async function main() {
+  await install();
+
+  // 异步检查更新，不阻塞安装
+  const latestVersion = await checkLatestVersion();
+  if (latestVersion) {
+    console.log("\n" + "=".repeat(50));
+    console.log(`⚠️  发现新版本: v${latestVersion}`);
+    console.log(`   当前版本: v${version}`);
+    console.log(`\n   更新命令: npm install -g claude-ccx`);
+    console.log("=".repeat(50));
+  }
+}
+
+main().catch((err) => {
   console.error(`安装 ccx 失败: ${err.message}`);
   process.exit(1);
 });

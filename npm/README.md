@@ -44,6 +44,35 @@ go build -o ccx .
 2. **Gitee 账号** 及 Personal Access Token（需要 Gist 读写权限）
 3. **一个 Gitee Gist** 用于存储配置（在 [gitee.com/dashboard/codes](https://gitee.com/dashboard/codes) 创建）
 
+## 更新
+
+### npm 安装方式
+
+```bash
+# 检查更新
+npm outdated -g claude-ccx
+
+# 更新到最新版本
+npm update -g claude-ccx
+
+# 或者重新安装
+npm install -g claude-ccx@latest
+```
+
+### 直接二进制安装方式
+
+```bash
+ccx self-update
+```
+
+或手动下载：
+
+```bash
+curl -Lo ccx.tar.gz https://github.com/fanxing-6/ccx/releases/latest/download/ccx_linux_amd64.tar.gz
+tar -xzf ccx.tar.gz
+sudo mv ccx /usr/local/bin/
+```
+
 ## 快速开始
 
 ### 1. 初始化
@@ -97,6 +126,7 @@ ccx -d my-api
 | `ccx edit <name>` | 编辑已有 profile |
 | `ccx remove <name>` | 删除 profile |
 | `ccx default <name>` | 设置默认 profile |
+| `ccx self-update` | 检查并更新到最新版本 |
 
 **别名**: `list` → `ls`，`remove` → `rm`
 
