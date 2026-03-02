@@ -336,6 +336,7 @@ func configMenu() error {
 			{Label: "修改配置", Key: "edit"},
 			{Label: "删除配置", Key: "remove"},
 			{Label: "设置默认", Key: "default"},
+			{Label: "重新初始化（Gitee）", Key: "reinit"},
 			{Label: "← 返回", Key: "__back__"},
 		}
 
@@ -354,6 +355,8 @@ func configMenu() error {
 			opErr = configMenuRemove()
 		case "default":
 			opErr = configMenuDefault()
+		case "reinit":
+			opErr = initRun()
 		}
 		if opErr != nil {
 			fmt.Printf("操作出错: %v\n\n", opErr)

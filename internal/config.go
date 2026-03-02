@@ -75,6 +75,15 @@ func ConfigExists() bool {
 	return err == nil
 }
 
+// DeleteAppConfig 删除本地配置文件（通常用于重置初始化状态）
+func DeleteAppConfig() error {
+	err := os.Remove(ConfigPath())
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 // ExtractProfileInfo 从 settings JSON 中提取展示信息
 func ExtractProfileInfo(settings json.RawMessage) ProfileInfo {
 	var parsed struct {

@@ -15,6 +15,7 @@ func TestIsPassthroughCandidate(t *testing.T) {
 		{name: "mcp command", arg: "mcp", want: true},
 		{name: "flag style invocation", arg: "-p", want: true},
 		{name: "ccx subcommand should not match", arg: "add", want: false},
+		{name: "ccx reset should not match", arg: "reset", want: false},
 		{name: "profile style arg should not match", arg: "volc", want: false},
 		{name: "help flag should not passthrough", arg: "--help", want: false},
 		{name: "empty args", arg: "", want: false},
@@ -44,6 +45,7 @@ func TestShouldPassthroughInvocation(t *testing.T) {
 		{name: "flag invocation", args: []string{"-p", "hello"}, want: true},
 		{name: "non candidate", args: []string{"volc"}, want: false},
 		{name: "ccx subcommand", args: []string{"list"}, want: false},
+		{name: "ccx reset", args: []string{"reset"}, want: false},
 		{name: "help flag", args: []string{"--help"}, want: false},
 	}
 

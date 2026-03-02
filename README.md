@@ -47,6 +47,12 @@ npm install -g claude-ccx
 ccx init
 ```
 
+如需重置本地 Gitee 连接信息（会删除 `~/.config/ccx/config.json`）：
+
+```bash
+ccx reset
+```
+
 会写入 `~/.config/ccx/config.json`（不包含 profile）：
 
 ```json

@@ -28,6 +28,7 @@ var ccxCommandTokens = map[string]struct{}{
 	"list":       {},
 	"ls":         {},
 	"remove":     {},
+	"reset":      {},
 	"rm":         {},
 }
 
