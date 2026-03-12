@@ -47,6 +47,55 @@
 - There is no repo-owned lint config such as `golangci-lint` in this codebase.
 - The practical validation loop is: `gofmt` on touched files, then `go test ./...`.
 
+## Release and Publishing Workflow
+- Pushing commits to `main` does not update GitHub Releases; releases are driven by Git tags.
+- The release workflow is `.github/workflows/release.yml` and only triggers on `push.tags: v*`.
+- The npm publish workflow is `.github/workflows/npm-publish.yml` and only triggers on GitHub Release `published` events.
+- Release builds are produced by `.goreleaser.yml`.
+- Current release artifact name is `ccx_linux_amd64.tar.gz`.
+- Current release target is Linux amd64 only, with `CGO_ENABLED=0`.
+- GoReleaser injects the binary version via `-X ccx/cmd.Version={{.Version}}`.
+
+## Release Steps for Agents
+- 1. Ensure the intended release commit is already on `main` and pushed.
+- 2. Run `go test ./...` locally before tagging.
+- 3. Check existing Git tags: `git tag --sort=-version:refname`.
+- 4. Check existing GitHub releases: `gh release list --limit 20`.
+- 5. Check published npm versions before choosing the next version: `npm view claude-ccx versions --json`.
+- 6. Pick a new version that does not already exist on npm; if the version already exists, the npm publish job will fail.
+- 7. Sync local branch first: `git pull --ff-only`.
+- 8. Create the tag on the release commit: `git tag vX.Y.Z`.
+- 9. Push the tag: `git push origin vX.Y.Z`.
+- 10. Monitor the release workflow: `gh run list --workflow release.yml --limit 10`.
+- 11. After the GitHub Release is published, monitor npm publish: `gh run list --workflow npm-publish.yml --limit 10`.
+- 12. Verify the release page and npm version after both workflows finish.
+
+## What the Release Workflow Does
+- Checks out the repository with full history.
+- Sets up Go `1.24`.
+- Runs `go test ./...`.
+- Runs `goreleaser release --clean`.
+- Creates or updates the GitHub Release for the pushed tag.
+- Uploads the packaged binary archive and checksum file to the release.
+
+## What the npm Publish Workflow Does
+- Triggers only after a GitHub Release is published, not when a tag is merely created locally.
+- Checks out the repository and sets up Node.js `22`.
+- Derives the npm package version from `GITHUB_REF_NAME` by stripping the leading `v`.
+- Runs `npm version "$TAG" --no-git-tag-version --allow-same-version` inside `npm/`.
+- Waits for the GitHub Release asset `ccx_linux_amd64.tar.gz` to become downloadable.
+- Runs `npm publish --provenance --access public` from `npm/`.
+
+## Release-Specific Notes
+- The committed `npm/package.json` version is not the final source of truth during CI publish; the workflow rewrites it from the Git tag.
+- Because `npm/install.js` downloads `https://github.com/fanxing-6/ccx/releases/download/v${version}/ccx_linux_amd64.tar.gz`, GitHub Release and npm version must match.
+- If GitHub Release and npm version drift apart, npm installs may fetch a non-existent binary asset.
+- Do not reuse an npm version number even if GitHub Releases does not yet show it.
+- If only `v0.1.0` appears on GitHub Releases, that means newer tags were never pushed or no newer release was created.
+- If a release workflow fails, inspect it with `gh run view <run-id> --log` before retrying.
+- If npm publish fails because the version already exists, create a new patch version tag instead of trying to republish the same version.
+- After publishing, verify with `npm view claude-ccx version` and by opening the GitHub Releases page.
+
 ## Formatting and Linting
 - Always run `gofmt` on changed Go files.
 - Example: `gofmt -w main.go cmd/*.go internal/*.go internal/proxy/*.go`
