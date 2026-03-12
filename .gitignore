@@ -10,5 +10,6 @@ npm/bin/
 # IDE
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
