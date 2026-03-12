@@ -1,6 +1,7 @@
 # 编译产物
 ccx
 dist/
+AGENTS.md
 
 # npm
 node_modules/
