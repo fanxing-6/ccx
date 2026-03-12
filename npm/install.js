@@ -40,13 +40,6 @@ function followRedirects(url, maxRedirects = 5) {
   });
 }
 
-const BINARY_NAME = "ccx";
-const DOWNLOAD_URL = `https://github.com/fanxing-6/ccx/releases/download/v${version}/ccx_linux_amd64.tar.gz`;
-
-const binDir = path.join(__dirname, "bin");
-const binPath = path.join(binDir, BINARY_NAME);
-const tmpFile = path.join(__dirname, "ccx.tar.gz");
-
 async function install() {
   if (process.platform !== "linux" || process.arch !== "x64") {
     console.error(`ccx 目前仅支持 linux/x64，当前平台: ${process.platform}/${process.arch}`);
