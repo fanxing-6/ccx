@@ -4,10 +4,6 @@ dist/
 AGENTS.md
 CLAUDE.md
 
-# npm
-node_modules/
-npm/bin/
-
 # IDE
 .idea/
 .vscode/

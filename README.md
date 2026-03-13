@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/fanxing-6/ccx/main/install.sh | CCX
 ### 安装指定版本
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fanxing-6/ccx/main/install.sh | CCX_VERSION=0.1.7 bash
+curl -fsSL https://raw.githubusercontent.com/fanxing-6/ccx/main/install.sh | CCX_VERSION=X.Y.Z bash
 ```
 
 ### 手动下载 Release 二进制
@@ -139,7 +139,7 @@ ccx self-update  # 检查并更新到最新版本
 curl -fsSL https://raw.githubusercontent.com/fanxing-6/ccx/main/install.sh | bash
 ```
 
-**直接二进制安装后自更新:**
+**或使用内置自更新命令:**
 ```bash
 ccx self-update
 ```

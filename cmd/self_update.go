@@ -41,7 +41,7 @@ func selfUpdate() error {
 	currentVersion := strings.TrimPrefix(Version, "v")
 	if currentVersion == "" || currentVersion == "dev" {
 		fmt.Println("当前为开发版本，无法自动更新")
-		fmt.Println("请手动重新安装: npm install -g claude-ccx")
+		fmt.Println("请手动重新运行安装脚本或从 GitHub Releases 下载二进制")
 		return nil
 	}
 
@@ -68,15 +68,6 @@ func selfUpdate() error {
 		return fmt.Errorf("自动更新仅支持 linux/amd64，当前平台: %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
-	// 确定更新方式
-	if isInstalledViaNPM() {
-		fmt.Println("\n通过 npm 更新:")
-		fmt.Printf("  npm install -g claude-ccx@%s\n", latestVersion)
-		fmt.Println("\n或者运行:")
-		fmt.Println("  npm update -g claude-ccx")
-		return nil
-	}
-
 	// 直接二进制更新
 	return binarySelfUpdate(latest.TagName)
 }
@@ -98,30 +89,6 @@ func fetchLatestRelease() (*releaseInfo, error) {
 		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
 	return &release, nil
-}
-
-func isInstalledViaNPM() bool {
-	// 检查是否在 npm 全局目录中
-	execPath, err := os.Executable()
-	if err != nil {
-		return false
-	}
-
-	// npm 全局路径通常包含 'lib/node_modules' 或 'node_modules'
-	if strings.Contains(execPath, "node_modules") {
-		return true
-	}
-
-	// 检查 npm 是否存在
-	_, err = exec.LookPath("npm")
-	if err != nil {
-		return false
-	}
-
-	// 尝试通过 npm list 检查
-	cmd := exec.Command("npm", "list", "-g", "claude-ccx")
-	output, _ := cmd.Output()
-	return strings.Contains(string(output), "claude-ccx")
 }
 
 func binarySelfUpdate(version string) error {
