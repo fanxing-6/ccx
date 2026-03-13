@@ -31,7 +31,10 @@ var rootCmd = &cobra.Command{
 	Example: `  ccx                  # 交互式选择配置并启动
   ccx volc             # 直接使用 volc 配置启动
   ccx -d volc          # 危险模式启动（跳过权限确认）
+  ccx -d -r            # 交互选配置后执行 claude resume
+  ccx volc -r          # 使用 volc 配置执行 claude resume
   ccx auth status      # 透传到 Claude CLI（非 ccx 命令）
+  ccx -- -p "hello"    # 强制原样透传到 Claude CLI
   ccx list             # 列出所有配置
   ccx info volc        # 查看 volc 配置详情`,
 	Args: cobra.ArbitraryArgs,
@@ -39,54 +42,9 @@ var rootCmd = &cobra.Command{
 		UnknownFlags: true,
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !internal.ConfigExists() {
-			fmt.Println("首次使用，请先初始化配置：")
-			fmt.Println("  打开 https://gitee.com/dashboard/codes 创建/选择 Gist")
-			fmt.Println("  Gist URL 示例: https://gitee.com/<owner>/codes/<gistID>")
-			return initRun()
-		}
-
-		cfg, err := internal.LoadAppConfig()
-		if err != nil {
-			return err
-		}
-		client := internal.NewGistClientFromConfig(cfg)
-
 		var profileName string
-
 		if len(args) > 0 {
 			profileName = args[0]
-		} else {
-			for {
-				fmt.Println("正在从 Gitee Gist 获取配置列表...")
-				profiles, err := client.FetchAllProfiles()
-				if err != nil {
-					return err
-				}
-				if len(profiles) == 0 {
-					return fmt.Errorf("Gitee Gist 中没有配置，运行 ccx add <name> 创建")
-				}
-
-				cfgReloaded, err := internal.LoadAppConfig()
-				if err != nil {
-					return err
-				}
-				cfg = cfgReloaded
-
-				selected, err := selectProfileOrConfig(profiles, cfg.DefaultProfile)
-				if err != nil {
-					return fmt.Errorf("已取消")
-				}
-
-				if selected == "__config__" {
-					if err := configMenu(); err != nil {
-						fmt.Printf("操作出错: %v\n\n", err)
-					}
-					continue
-				}
-				profileName = selected
-				break
-			}
 		}
 
 		var extraArgs []string
@@ -94,8 +52,58 @@ var rootCmd = &cobra.Command{
 			extraArgs = args[1:]
 		}
 		dangerous, _ := cmd.Flags().GetBool("dangerous")
-		return launchClaude(profileName, extraArgs, dangerous, client, cfg)
+		return runRoot(profileName, extraArgs, dangerous)
 	},
+}
+
+func runRoot(profileName string, extraArgs []string, dangerous bool) error {
+	if !internal.ConfigExists() {
+		fmt.Println("首次使用，请先初始化配置：")
+		fmt.Println("  打开 https://gitee.com/dashboard/codes 创建/选择 Gist")
+		fmt.Println("  Gist URL 示例: https://gitee.com/<owner>/codes/<gistID>")
+		return initRun()
+	}
+
+	cfg, err := internal.LoadAppConfig()
+	if err != nil {
+		return err
+	}
+	client := internal.NewGistClientFromConfig(cfg)
+
+	if profileName == "" {
+		for {
+			fmt.Println("正在从 Gitee Gist 获取配置列表...")
+			profiles, err := client.FetchAllProfiles()
+			if err != nil {
+				return err
+			}
+			if len(profiles) == 0 {
+				return fmt.Errorf("Gitee Gist 中没有配置，运行 ccx add <name> 创建")
+			}
+
+			cfgReloaded, err := internal.LoadAppConfig()
+			if err != nil {
+				return err
+			}
+			cfg = cfgReloaded
+
+			selected, err := selectProfileOrConfig(profiles, cfg.DefaultProfile)
+			if err != nil {
+				return fmt.Errorf("已取消")
+			}
+
+			if selected == "__config__" {
+				if err := configMenu(); err != nil {
+					fmt.Printf("操作出错: %v\n\n", err)
+				}
+				continue
+			}
+			profileName = selected
+			break
+		}
+	}
+
+	return launchClaude(profileName, extraArgs, dangerous, client, cfg)
 }
 
 func selectProfileOrConfig(profiles []*internal.Profile, defaultProfile string) (string, error) {
@@ -340,8 +348,16 @@ func Execute() {
 		os.Exit(1)
 	}
 
-	if passArgs, dangerous, ok := decideRawPassthrough(os.Args[1:]); ok {
-		if err := launchClaudePassthrough(resolvePassthroughClaudeCmd(), passArgs, dangerous); err != nil {
+	decision := decideInvocation(os.Args[1:])
+	switch decision.mode {
+	case invocationModePassthrough:
+		if err := launchClaudePassthrough(resolvePassthroughClaudeCmd(), decision.passthroughArgs, decision.dangerous); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	case invocationModeLaunch:
+		if err := runRoot(decision.profileName, decision.extraArgs, decision.dangerous); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

@@ -13,7 +13,7 @@ func TestIsPassthroughCandidate(t *testing.T) {
 		{name: "auth command", arg: "auth", want: true},
 		{name: "update command", arg: "update", want: true},
 		{name: "mcp command", arg: "mcp", want: true},
-		{name: "flag style invocation", arg: "-p", want: true},
+		{name: "flag style invocation", arg: "-p", want: false},
 		{name: "ccx subcommand should not match", arg: "add", want: false},
 		{name: "ccx reset should not match", arg: "reset", want: false},
 		{name: "profile style arg should not match", arg: "volc", want: false},
@@ -42,7 +42,7 @@ func TestShouldPassthroughInvocation(t *testing.T) {
 		want bool
 	}{
 		{name: "auth command", args: []string{"auth", "status"}, want: true},
-		{name: "flag invocation", args: []string{"-p", "hello"}, want: true},
+		{name: "flag invocation should launch profile", args: []string{"-p", "hello"}, want: false},
 		{name: "non candidate", args: []string{"volc"}, want: false},
 		{name: "ccx subcommand", args: []string{"list"}, want: false},
 		{name: "ccx reset", args: []string{"reset"}, want: false},
@@ -91,6 +91,16 @@ func TestDecideRawPassthrough(t *testing.T) {
 			wantOK:       true,
 			wantDanger:   false,
 			wantPassArgs: []string{"-p", "hello"},
+		},
+		{
+			name:   "claude short flag should not passthrough",
+			raw:    []string{"-r"},
+			wantOK: false,
+		},
+		{
+			name:   "dangerous plus claude short flag should not passthrough",
+			raw:    []string{"-d", "-r"},
+			wantOK: false,
 		},
 		{
 			name:   "ccx subcommand should not passthrough",
@@ -145,5 +155,102 @@ func TestContainsDangerousFlag(t *testing.T) {
 	}
 	if containsDangerousFlag([]string{"--model", "sonnet"}) {
 		t.Fatalf("unexpected dangerous flag detection")
+	}
+}
+
+func TestDecideInvocation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                string
+		raw                 []string
+		wantMode            invocationMode
+		wantDanger          bool
+		wantProfileName     string
+		wantExtraArgs       []string
+		wantPassthroughArgs []string
+	}{
+		{
+			name:            "empty args launch interactive profile",
+			raw:             nil,
+			wantMode:        invocationModeLaunch,
+			wantProfileName: "",
+		},
+		{
+			name:            "profile launch keeps extra args",
+			raw:             []string{"volc", "-r"},
+			wantMode:        invocationModeLaunch,
+			wantProfileName: "volc",
+			wantExtraArgs:   []string{"-r"},
+		},
+		{
+			name:          "claude short flag launches selected profile flow",
+			raw:           []string{"-r"},
+			wantMode:      invocationModeLaunch,
+			wantDanger:    false,
+			wantExtraArgs: []string{"-r"},
+		},
+		{
+			name:          "dangerous plus claude short flag launches selected profile flow",
+			raw:           []string{"-d", "-r"},
+			wantMode:      invocationModeLaunch,
+			wantDanger:    true,
+			wantExtraArgs: []string{"-r"},
+		},
+		{
+			name:                "auth command stays passthrough",
+			raw:                 []string{"auth", "status"},
+			wantMode:            invocationModePassthrough,
+			wantPassthroughArgs: []string{"auth", "status"},
+		},
+		{
+			name:                "double dash stays passthrough",
+			raw:                 []string{"--", "-p", "hello"},
+			wantMode:            invocationModePassthrough,
+			wantPassthroughArgs: []string{"-p", "hello"},
+		},
+		{
+			name:     "help uses cobra",
+			raw:      []string{"--help"},
+			wantMode: invocationModeCobra,
+		},
+		{
+			name:     "ccx subcommand uses cobra",
+			raw:      []string{"list"},
+			wantMode: invocationModeCobra,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := decideInvocation(tc.raw)
+			if got.mode != tc.wantMode {
+				t.Fatalf("decideInvocation(%v) mode=%v, want %v", tc.raw, got.mode, tc.wantMode)
+			}
+			if got.dangerous != tc.wantDanger {
+				t.Fatalf("decideInvocation(%v) dangerous=%v, want %v", tc.raw, got.dangerous, tc.wantDanger)
+			}
+			if got.profileName != tc.wantProfileName {
+				t.Fatalf("decideInvocation(%v) profile=%q, want %q", tc.raw, got.profileName, tc.wantProfileName)
+			}
+			assertArgsEqual(t, tc.raw, "extraArgs", got.extraArgs, tc.wantExtraArgs)
+			assertArgsEqual(t, tc.raw, "passthroughArgs", got.passthroughArgs, tc.wantPassthroughArgs)
+		})
+	}
+}
+
+func assertArgsEqual(t *testing.T, raw []string, field string, got, want []string) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("%s for %v=%v, want %v", field, raw, got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("%s for %v=%v, want %v", field, raw, got, want)
+		}
 	}
 }

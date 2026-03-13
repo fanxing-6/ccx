@@ -190,6 +190,14 @@ ccx self-update
 
 当参数不属于 `ccx` 自有命令，且符合透传规则时，`ccx` 会直接执行 `claude ...`。
 
+简单规则：
+
+- `-d` / `--dangerous` 只属于 `ccx`，会转换成 Claude Code 的 `--dangerously-skip-permissions`
+- `ccx auth ...`、`ccx update`、`ccx mcp ...`、`ccx agents ...`、`ccx remote-control ...` 会直接透传到 `claude`
+- `ccx -- ...` 表示后面的参数全部原样透传给 `claude`
+- 其它情况默认走配置启动流程：第一个普通参数视为 profile，其余参数透传给 Claude Code
+- 如果一开始就是 Claude Code 的 flag（如 `ccx -r`），则先按 `ccx` 的配置启动，再把 `-r` 传给 Claude Code
+
 示例：
 
 ```bash
@@ -197,6 +205,8 @@ ccx auth status
 ccx update
 ccx -- -p "hello"
 ccx -d auth status
+ccx -d -r
+ccx volc -r
 ```
 
 内置透传顶级命令：

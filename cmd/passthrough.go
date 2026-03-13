@@ -9,6 +9,22 @@ import (
 	"syscall"
 )
 
+type invocationMode int
+
+const (
+	invocationModeCobra invocationMode = iota
+	invocationModeLaunch
+	invocationModePassthrough
+)
+
+type invocationDecision struct {
+	mode            invocationMode
+	dangerous       bool
+	profileName     string
+	extraArgs       []string
+	passthroughArgs []string
+}
+
 var claudePassthroughCommands = map[string]struct{}{
 	"agents":         {},
 	"auth":           {},
@@ -40,14 +56,6 @@ func isPassthroughCandidate(token string) bool {
 	if _, ok := claudePassthroughCommands[first]; ok {
 		return true
 	}
-	if strings.HasPrefix(first, "-") {
-		switch first {
-		case "-h", "--help", "-v", "--version":
-			return false
-		default:
-			return true
-		}
-	}
 	return false
 }
 
@@ -56,23 +64,35 @@ func shouldPassthroughInvocation(args []string) bool {
 	return ok
 }
 
-func decideRawPassthrough(rawArgs []string) (passArgs []string, dangerous bool, ok bool) {
-	if len(rawArgs) == 0 {
-		return nil, false, false
-	}
-
-	args := append([]string(nil), rawArgs...)
+func stripLeadingDangerousFlag(rawArgs []string) (args []string, dangerous bool) {
+	args = append([]string(nil), rawArgs...)
 	for len(args) > 0 {
 		switch args[0] {
 		case "-d", "--dangerous":
 			dangerous = true
 			args = args[1:]
 		default:
-			goto parse
+			return args, dangerous
 		}
 	}
+	return args, dangerous
+}
 
-parse:
+func isHelpOrVersionFlag(token string) bool {
+	switch token {
+	case "-h", "--help", "-v", "--version":
+		return true
+	default:
+		return false
+	}
+}
+
+func decideRawPassthrough(rawArgs []string) (passArgs []string, dangerous bool, ok bool) {
+	if len(rawArgs) == 0 {
+		return nil, false, false
+	}
+
+	args, dangerous := stripLeadingDangerousFlag(rawArgs)
 	if len(args) == 0 {
 		return nil, false, false
 	}
@@ -86,6 +106,9 @@ parse:
 	}
 
 	first := strings.TrimSpace(args[0])
+	if isHelpOrVersionFlag(first) {
+		return nil, false, false
+	}
 	if _, exists := ccxCommandTokens[first]; exists {
 		return nil, false, false
 	}
@@ -93,6 +116,46 @@ parse:
 		return nil, false, false
 	}
 	return args, dangerous, true
+}
+
+func decideInvocation(rawArgs []string) invocationDecision {
+	if passArgs, dangerous, ok := decideRawPassthrough(rawArgs); ok {
+		return invocationDecision{
+			mode:            invocationModePassthrough,
+			dangerous:       dangerous,
+			passthroughArgs: passArgs,
+		}
+	}
+
+	args, dangerous := stripLeadingDangerousFlag(rawArgs)
+	if len(args) == 0 {
+		return invocationDecision{
+			mode:      invocationModeLaunch,
+			dangerous: dangerous,
+		}
+	}
+
+	first := strings.TrimSpace(args[0])
+	if isHelpOrVersionFlag(first) {
+		return invocationDecision{mode: invocationModeCobra}
+	}
+	if _, exists := ccxCommandTokens[first]; exists {
+		return invocationDecision{mode: invocationModeCobra}
+	}
+	if strings.HasPrefix(first, "-") {
+		return invocationDecision{
+			mode:      invocationModeLaunch,
+			dangerous: dangerous,
+			extraArgs: append([]string(nil), args...),
+		}
+	}
+
+	return invocationDecision{
+		mode:        invocationModeLaunch,
+		dangerous:   dangerous,
+		profileName: first,
+		extraArgs:   append([]string(nil), args[1:]...),
+	}
 }
 
 func launchClaudePassthrough(claudeCmd string, args []string, dangerous bool) error {
