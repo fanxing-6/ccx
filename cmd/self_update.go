@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -36,10 +37,16 @@ type releaseInfo struct {
 	Name    string `json:"name"`
 }
 
+var (
+	fetchLatestReleaseFunc   = fetchLatestRelease
+	binarySelfUpdateFunc     = binarySelfUpdate
+	reexecCurrentProcessFunc = reexecCurrentProcess
+)
+
 func selfUpdate() error {
 	// 获取当前版本
-	currentVersion := strings.TrimPrefix(Version, "v")
-	if currentVersion == "" || currentVersion == "dev" {
+	currentVersion, ok := currentInstalledVersion()
+	if !ok {
 		fmt.Println("当前为开发版本，无法自动更新")
 		fmt.Println("请手动重新运行安装脚本或从 GitHub Releases 下载二进制")
 		return nil
@@ -70,6 +77,45 @@ func selfUpdate() error {
 
 	// 直接二进制更新
 	return binarySelfUpdate(latest.TagName)
+}
+
+func autoUpdateBeforeStartup(rawArgs []string) error {
+	currentVersion, ok := currentInstalledVersion()
+	if !ok {
+		return nil
+	}
+
+	latest, err := fetchLatestReleaseFunc()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "自动更新检查失败，继续启动当前版本: %v\n", err)
+		return nil
+	}
+
+	latestVersion := strings.TrimPrefix(latest.TagName, "v")
+	if latestVersion == "" || latestVersion == currentVersion {
+		return nil
+	}
+
+	fmt.Printf("发现新版本: v%s\n", latestVersion)
+	fmt.Printf("发布说明: %s\n", latest.Name)
+	if err := binarySelfUpdateFunc(latest.TagName); err != nil {
+		fmt.Fprintf(os.Stderr, "自动更新失败，继续启动当前版本: %v\n", err)
+		return nil
+	}
+
+	fmt.Printf("已自动更新到 v%s，正在重新启动...\n", latestVersion)
+	return reexecCurrentProcessFunc(rawArgs)
+}
+
+func currentInstalledVersion() (string, bool) {
+	currentVersion := strings.TrimPrefix(Version, "v")
+	if currentVersion == "" || currentVersion == "dev" {
+		return "", false
+	}
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		return "", false
+	}
+	return currentVersion, true
 }
 
 func fetchLatestRelease() (*releaseInfo, error) {
@@ -163,6 +209,15 @@ func binarySelfUpdate(version string) error {
 
 	fmt.Printf("\n✓ 更新成功: v%s\n", strings.TrimPrefix(version, "v"))
 	return nil
+}
+
+func reexecCurrentProcess(rawArgs []string) error {
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("获取当前路径失败: %w", err)
+	}
+	argv := append([]string{execPath}, rawArgs...)
+	return syscall.Exec(execPath, argv, os.Environ())
 }
 
 func downloadFile(url, dest string) error {

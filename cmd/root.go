@@ -335,6 +335,11 @@ func printLaunchSummary(claudeCmd, profileName string, info internal.ProfileInfo
 }
 
 func Execute() {
+	if err := autoUpdateBeforeStartup(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	if passArgs, dangerous, ok := decideRawPassthrough(os.Args[1:]); ok {
 		if err := launchClaudePassthrough(resolvePassthroughClaudeCmd(), passArgs, dangerous); err != nil {
 			fmt.Fprintln(os.Stderr, err)
