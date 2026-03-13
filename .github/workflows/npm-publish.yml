@@ -1,8 +1,9 @@
 name: Publish npm
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -10,11 +11,27 @@ permissions:
 
 jobs:
   publish:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: npm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: release_tag
+        run: |
+          TAG=$(git tag --points-at HEAD | grep '^v' | sort -V | tail -n 1)
+          if [ -z "$TAG" ]; then
+            echo "未找到与 release workflow 对应的 tag"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: $TAG"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -24,14 +41,13 @@ jobs:
 
       - name: Sync version from tag
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
           cd npm
-          npm version "$TAG" --no-git-tag-version --allow-same-version
-          echo "Publishing version: $TAG"
+          npm version "${{ steps.release_tag.outputs.version }}" --no-git-tag-version --allow-same-version
+          echo "Publishing version: ${{ steps.release_tag.outputs.version }}"
 
       - name: Wait for release assets
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${{ steps.release_tag.outputs.tag }}"
           echo "Waiting for GitHub release assets..."
           for i in $(seq 1 30); do
             STATUS=$(curl -sL -o /dev/null -w "%{http_code}" "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/ccx_linux_amd64.tar.gz")
