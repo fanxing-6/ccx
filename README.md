@@ -19,18 +19,40 @@
 
 ## 安装
 
+### 一键安装（推荐）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fanxing-6/ccx/main/install.sh | bash
+```
+
+默认安装到 `/usr/local/bin/ccx`。
+
+### 安装到自定义目录
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fanxing-6/ccx/main/install.sh | CCX_INSTALL_DIR="$HOME/.local/bin" bash
+```
+
+### 安装指定版本
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fanxing-6/ccx/main/install.sh | CCX_VERSION=0.1.7 bash
+```
+
+### 手动下载 Release 二进制
+
+```bash
+curl -Lo ccx.tar.gz https://github.com/fanxing-6/ccx/releases/latest/download/ccx_linux_amd64.tar.gz
+tar -xzf ccx.tar.gz
+sudo install -m 0755 ccx /usr/local/bin/ccx
+```
+
 ### 从源码构建
 
 ```bash
 git clone https://github.com/fanxing-6/ccx.git
 cd ccx
 go build -o ccx .
-```
-
-### npm
-
-```bash
-npm install -g claude-ccx
 ```
 
 ## 前置条件
@@ -111,12 +133,13 @@ ccx self-update  # 检查并更新到最新版本
 
 ### 更新
 
-**npm 安装方式:**
+**重新执行安装脚本（默认更新到最新版本）:**
+
 ```bash
-npm update -g claude-ccx
+curl -fsSL https://raw.githubusercontent.com/fanxing-6/ccx/main/install.sh | bash
 ```
 
-**直接二进制安装:**
+**直接二进制安装后自更新:**
 ```bash
 ccx self-update
 ```
